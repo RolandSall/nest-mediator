@@ -17,6 +17,19 @@ A lightweight CQRS (Command Query Responsibility Segregation) mediator pattern i
 npm install @rolandsall24/nest-mediator
 ```
 
+### TypeScript Configuration
+
+This library requires TypeScript decorators to be enabled. Add the following to your `tsconfig.json`:
+
+```json
+{
+  "compilerOptions": {
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
+  }
+}
+```
+
 ## Quick Start
 
 ### 1. Import the Module
