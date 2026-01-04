@@ -60,13 +60,6 @@ export interface NestMediatorModuleOptions {
    * Default: 500
    */
   performanceThresholdMs?: number;
-
-  /**
-   * Custom pipeline behaviors to register.
-   * These will be registered in addition to any behaviors
-   * discovered via @PipelineBehavior decorator.
-   */
-  behaviors?: Type<IPipelineBehavior<any, any>>[];
 }
 
 /**
@@ -170,11 +163,6 @@ export class NestMediatorModule implements OnModuleInit {
    *   enablePerformanceTracking: true,
    *   performanceThresholdMs: 1000,
    * })
-   *
-   * // With custom behaviors
-   * NestMediatorModule.forRoot({
-   *   behaviors: [MyCustomBehavior],
-   * })
    * ```
    */
   static forRoot(options: NestMediatorModuleOptions = {}): DynamicModule {
@@ -197,9 +185,6 @@ export class NestMediatorModule implements OnModuleInit {
       builtInProviders.push(ValidationBehavior);
     }
 
-    // Add custom behaviors
-    const customBehaviors = options.behaviors ?? [];
-
     return {
       module: NestMediatorModule,
       imports: [DiscoveryModule],
@@ -207,7 +192,6 @@ export class NestMediatorModule implements OnModuleInit {
         MediatorBus,
         Reflector,
         ...builtInProviders,
-        ...customBehaviors,
         {
           provide: NEST_MEDIATOR_OPTIONS,
           useValue: options,

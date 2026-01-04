@@ -758,7 +758,6 @@ Module registration with configuration options.
 | `enableExceptionHandling` | boolean | false | Enable centralized exception logging |
 | `enablePerformanceTracking` | boolean | false | Enable slow request warnings |
 | `performanceThresholdMs` | number | 500 | Threshold for slow request warnings |
-| `behaviors` | Type[] | [] | Additional custom behaviors to register |
 
 ## Pipeline Behaviors
 
@@ -839,28 +838,12 @@ export class MyCustomBehavior<TRequest, TResponse>
 
 ### Registering Custom Behaviors
 
-Add your behavior to the module providers:
-
-```typescript
-@Module({
-  imports: [
-    NestMediatorModule.forRoot({
-      behaviors: [MyCustomBehavior],
-    }),
-  ],
-  providers: [
-    MyCustomBehavior, // Also add to providers for DI
-  ],
-})
-export class AppModule {}
-```
-
-Or use the `@PipelineBehavior` decorator and add to providers - it will be auto-discovered:
+Custom behaviors with the `@PipelineBehavior` decorator are auto-discovered. Just add them to your module's providers:
 
 ```typescript
 @Module({
   imports: [NestMediatorModule.forRoot()],
-  providers: [MyCustomBehavior], // Auto-discovered via decorator
+  providers: [MyCustomBehavior], // Auto-discovered via @PipelineBehavior decorator
 })
 export class AppModule {}
 ```
