@@ -1,0 +1,135 @@
+### ========================================
+### NestJS Mediator - Example API Tests
+### ========================================
+### Run the app first: npm run start:dev
+### Then execute these requests to test behaviors
+
+### ----------------------------------------
+### BASIC OPERATIONS
+### ----------------------------------------
+
+### Create a new user (all behaviors run)
+POST http://localhost:3000/users
+Content-Type: application/json
+
+{
+  "name": "John Doe",
+  "email": "john@example.com"
+}
+
+### Get user by ID (caching behavior - run twice to see cache hit)
+GET http://localhost:3000/users/123
+
+### Get same user again (should show CACHE HIT in logs)
+GET http://localhost:3000/users/123
+
+### ----------------------------------------
+### RETRY BEHAVIOR TEST
+### ----------------------------------------
+
+### Process payment (normal - succeeds immediately)
+POST http://localhost:3000/payments
+Content-Type: application/json
+
+{
+  "orderId": "order-001",
+  "amount": 99.99
+}
+
+### Process unreliable payment (fails 2x, succeeds on 3rd attempt)
+### Watch the logs to see retry behavior in action!
+POST http://localhost:3000/payments/unreliable
+Content-Type: application/json
+
+{
+  "orderId": "order-retry-test",
+  "amount": 50.00
+}
+
+### ----------------------------------------
+### AUTHORIZATION BEHAVIOR TEST
+### ----------------------------------------
+
+### Check current user
+GET http://localhost:3000/auth/me
+
+### Delete user (FAILS - requires admin role)
+DELETE http://localhost:3000/users/123
+
+### Login as admin
+POST http://localhost:3000/auth/login
+Content-Type: application/json
+
+{
+  "userId": "admin-1",
+  "roles": ["user", "admin"]
+}
+
+### Delete user (SUCCEEDS - now has admin role)
+DELETE http://localhost:3000/users/456
+
+### Login as regular user (no admin)
+POST http://localhost:3000/auth/login
+Content-Type: application/json
+
+{
+  "userId": "user-1",
+  "roles": ["user"]
+}
+
+### Delete user (FAILS again - no admin role)
+DELETE http://localhost:3000/users/789
+
+### ----------------------------------------
+### UNAUTHENTICATED ACCESS TEST
+### ----------------------------------------
+
+### Logout (clears user session)
+POST http://localhost:3000/auth/logout
+
+### Any request now fails with 401 Unauthorized
+GET http://localhost:3000/users/123
+
+### Create user also fails when logged out
+POST http://localhost:3000/users
+Content-Type: application/json
+
+{
+  "name": "Jane Doe",
+  "email": "jane@example.com"
+}
+
+### Login again to restore access
+POST http://localhost:3000/auth/login
+Content-Type: application/json
+
+{
+  "userId": "user-123",
+  "roles": ["user"]
+}
+
+### ----------------------------------------
+### CACHE MANAGEMENT
+### ----------------------------------------
+
+### Clear the query cache
+POST http://localhost:3000/cache/clear
+
+### Query after cache clear (should show CACHE MISS)
+GET http://localhost:3000/users/test-user
+
+### ----------------------------------------
+### SKIP BEHAVIOR TEST
+### ----------------------------------------
+### GetUserQuery has @SkipBehavior([PerformanceBehavior, LoggingBehavior])
+### Notice: No "Handling GetUserQuery..." logs appear for queries!
+
+### This query skips Performance and Logging behaviors
+GET http://localhost:3000/users/skip-test
+
+### ----------------------------------------
+### HEALTH CHECK
+### ----------------------------------------
+
+### Basic health check
+GET http://localhost:3000
