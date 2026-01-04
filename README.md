@@ -707,6 +707,16 @@ Marks a class as a pipeline behavior.
   - `options.scope` - `'command'`, `'query'`, or `'all'` (default: `'all'`)
 - **Usage**: Apply to behavior classes that implement `IPipelineBehavior`
 
+#### `@SkipBehavior(behavior | behaviors[])`
+
+Excludes specific pipeline behaviors from a command or query.
+
+- **Parameters**:
+  - Single behavior class: `@SkipBehavior(PerformanceBehavior)`
+  - Array of behavior classes: `@SkipBehavior([PerformanceBehavior, LoggingBehavior])`
+- **Usage**: Apply to command or query classes
+- **Works with**: Both built-in behaviors and custom behaviors
+
 ### Services
 
 #### `MediatorBus`
@@ -853,6 +863,230 @@ Or use the `@PipelineBehavior` decorator and add to providers - it will be auto-
   providers: [MyCustomBehavior], // Auto-discovered via decorator
 })
 export class AppModule {}
+```
+
+### Skipping Behaviors for Specific Commands/Queries
+
+Use `@SkipBehavior` to exclude specific behaviors from a command or query:
+
+```typescript
+import {
+  ICommand,
+  SkipBehavior,
+  PerformanceBehavior,
+  LoggingBehavior,
+} from '@rolandsall24/nest-mediator';
+
+// Skip a single behavior
+@SkipBehavior(PerformanceBehavior)
+export class HighFrequencyCommand implements ICommand {
+  // This command will not trigger performance tracking
+}
+
+// Skip multiple behaviors
+@SkipBehavior([PerformanceBehavior, LoggingBehavior])
+export class HealthCheckQuery implements IQuery {
+  // This query skips both performance and logging behaviors
+}
+```
+
+This works with both built-in behaviors and custom behaviors:
+
+```typescript
+import { SkipBehavior } from '@rolandsall24/nest-mediator';
+import { MyAuditBehavior } from './behaviors/audit.behavior';
+
+@SkipBehavior(MyAuditBehavior)
+export class InternalCommand implements ICommand {
+  // Skips your custom audit behavior
+}
+```
+
+### Custom Behavior with Service Injection
+
+Behaviors support full NestJS dependency injection:
+
+```typescript
+import { Injectable, Logger } from '@nestjs/common';
+import { IPipelineBehavior, PipelineBehavior } from '@rolandsall24/nest-mediator';
+
+// Service for audit logging
+@Injectable()
+export class AuditService {
+  private readonly logger = new Logger(AuditService.name);
+
+  async logAction(action: string, userId: string): Promise<void> {
+    this.logger.log(`[AUDIT] ${action} by ${userId}`);
+    // Save to database, send to external service, etc.
+  }
+}
+
+// Behavior that uses the service
+@Injectable()
+@PipelineBehavior({ priority: 50, scope: 'command' })
+export class AuditLoggingBehavior<TRequest, TResponse>
+  implements IPipelineBehavior<TRequest, TResponse> {
+
+  constructor(private readonly auditService: AuditService) {}
+
+  async handle(
+    request: TRequest,
+    next: () => Promise<TResponse>,
+  ): Promise<TResponse> {
+    const requestName = request.constructor.name;
+
+    await this.auditService.logAction(`Executing ${requestName}`, 'user-123');
+
+    const response = await next();
+
+    await this.auditService.logAction(`Completed ${requestName}`, 'user-123');
+
+    return response;
+  }
+}
+
+// Register both in your module
+@Module({
+  imports: [NestMediatorModule.forRoot()],
+  providers: [
+    AuditService,           // The service
+    AuditLoggingBehavior,   // The behavior (auto-discovered)
+  ],
+})
+export class AppModule {}
+```
+
+### Advanced Behavior Examples
+
+#### Retry Behavior (for transient failures)
+
+```typescript
+@Injectable()
+@PipelineBehavior({ priority: -50, scope: 'command' })
+export class RetryBehavior<TRequest, TResponse>
+  implements IPipelineBehavior<TRequest, TResponse> {
+
+  private readonly maxRetries = 3;
+
+  async handle(
+    request: TRequest,
+    next: () => Promise<TResponse>,
+  ): Promise<TResponse> {
+    let lastError: Error;
+
+    for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
+      try {
+        return await next();
+      } catch (error) {
+        lastError = error as Error;
+
+        // Don't retry validation errors
+        if (error.name?.includes('Validation')) throw error;
+
+        if (attempt < this.maxRetries) {
+          const delay = 100 * Math.pow(2, attempt - 1); // Exponential backoff
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+
+    throw lastError!;
+  }
+}
+```
+
+#### Caching Behavior (for queries)
+
+```typescript
+@Injectable()
+@PipelineBehavior({ priority: 5, scope: 'query' })
+export class CachingBehavior<TRequest, TResponse>
+  implements IPipelineBehavior<TRequest, TResponse> {
+
+  private cache = new Map<string, { data: any; expiry: number }>();
+
+  async handle(
+    request: TRequest,
+    next: () => Promise<TResponse>,
+  ): Promise<TResponse> {
+    const key = JSON.stringify(request);
+    const cached = this.cache.get(key);
+
+    if (cached && cached.expiry > Date.now()) {
+      return cached.data; // Cache hit
+    }
+
+    const result = await next();
+
+    this.cache.set(key, {
+      data: result,
+      expiry: Date.now() + 30000, // 30 second TTL
+    });
+
+    return result;
+  }
+}
+```
+
+#### Authorization Behavior
+
+```typescript
+@Injectable()
+@PipelineBehavior({ priority: 25, scope: 'all' })
+export class AuthorizationBehavior<TRequest, TResponse>
+  implements IPipelineBehavior<TRequest, TResponse> {
+
+  constructor(private readonly authService: AuthService) {}
+
+  private readonly adminOnlyCommands = ['DeleteUserCommand'];
+
+  async handle(
+    request: TRequest,
+    next: () => Promise<TResponse>,
+  ): Promise<TResponse> {
+    const requestName = request.constructor.name;
+
+    if (!this.authService.isAuthenticated()) {
+      throw new UnauthorizedException('Authentication required');
+    }
+
+    if (this.adminOnlyCommands.includes(requestName)) {
+      if (!this.authService.hasRole('admin')) {
+        throw new ForbiddenException('Admin role required');
+      }
+    }
+
+    return next();
+  }
+}
+```
+
+### Complete Behavior Execution Order Example
+
+With the following behaviors configured:
+
+```typescript
+// Built-in behaviors (when enabled):
+// ExceptionHandlingBehavior: priority -100, scope 'all'
+// LoggingBehavior: priority 0, scope 'all'
+// PerformanceBehavior: priority 10, scope 'all'
+// ValidationBehavior: priority 100, scope 'all'
+
+// Custom behaviors:
+// RetryBehavior: priority -50, scope 'command'
+// CachingBehavior: priority 5, scope 'query'
+// AuthorizationBehavior: priority 25, scope 'all'
+// AuditLoggingBehavior: priority 50, scope 'command'
+```
+
+**For a Command:**
+```
+Request → Exception(-100) → Retry(-50) → Logging(0) → Performance(10) → Authorization(25) → Audit(50) → Validation(100) → Handler
+```
+
+**For a Query:**
+```
+Request → Exception(-100) → Logging(0) → Caching(5) → Performance(10) → Authorization(25) → Validation(100) → Handler
 ```
 
 ### Validation with class-validator

@@ -1,5 +1,5 @@
 import { Injectable, Logger, Type } from '@nestjs/common';
-import { ModuleRef } from '@nestjs/core';
+import { ModuleRef, Reflector } from '@nestjs/core';
 import {
   ICommand,
   ICommandHandler,
@@ -11,6 +11,7 @@ import {
   PipelineBehaviorOptions,
 } from '../interfaces/pipeline-behavior.interface.js';
 import { HandlerNotFoundException } from '../exceptions/handler-not-found.exception.js';
+import { SKIP_BEHAVIORS_METADATA } from '../decorators/skip-behavior.decorator.js';
 
 /**
  * Registered behavior with its metadata
@@ -51,7 +52,10 @@ export class MediatorBus {
   private queryHandlers = new Map<string, Type<IQueryHandler<any, any>>>();
   private pipelineBehaviors: RegisteredBehavior[] = [];
 
-  constructor(private readonly moduleRef: ModuleRef) {}
+  constructor(
+    private readonly moduleRef: ModuleRef,
+    private readonly reflector: Reflector,
+  ) {}
 
   /**
    * Register a command handler
@@ -172,10 +176,26 @@ export class MediatorBus {
     scope: 'command' | 'query',
     handler: () => Promise<TResponse>
   ): () => Promise<TResponse> {
-    // Filter behaviors by scope
+    // Get behaviors to skip from request metadata
+    const requestClass = (request as object).constructor;
+    const behaviorsToSkip: Type<IPipelineBehavior>[] =
+      this.reflector.get<Type<IPipelineBehavior>[]>(
+        SKIP_BEHAVIORS_METADATA,
+        requestClass,
+      ) ?? [];
+
+    // Filter behaviors by scope and skip list
     const applicableBehaviors = this.pipelineBehaviors.filter((b) => {
+      // Check scope
       const behaviorScope = b.options.scope ?? 'all';
-      return behaviorScope === 'all' || behaviorScope === scope;
+      const scopeMatches = behaviorScope === 'all' || behaviorScope === scope;
+
+      // Check if this behavior should be skipped
+      const shouldSkip = behaviorsToSkip.some(
+        (skipType) => skipType === b.type,
+      );
+
+      return scopeMatches && !shouldSkip;
     });
 
     // If no behaviors, just return the handler
