@@ -20,6 +20,7 @@ import {
   RetryBehavior,
   AuthorizationService,
   AuthorizationBehavior,
+  CreateUserValidationBehavior,
 } from './behaviors';
 
 @Module({
@@ -58,11 +59,13 @@ import {
     //   10: PerformanceBehavior (built-in)
     //   25: AuthorizationBehavior (custom)
     //   50: AuditLoggingBehavior (custom, command-only)
+    //   95: CreateUserValidationBehavior (custom, CreateUserCommand-only) <-- NEW: Type-specific!
     //  100: ValidationBehavior (built-in)
     AuditLoggingBehavior,
     CachingBehavior,
     RetryBehavior,
     AuthorizationBehavior,
+    CreateUserValidationBehavior,
   ],
 })
 export class AppModule {}
