@@ -8,7 +8,8 @@ A lightweight CQRS (Command Query Responsibility Segregation) mediator pattern i
 - Type-safe handlers with TypeScript
 - Decorator-based handler registration
 - Automatic handler discovery and registration
-- **Pipeline Behaviors** for cross-cutting concerns (logging, validation, etc.)
+- Pipeline Behaviors for cross-cutting concerns (logging, validation, etc.)
+- Type-Specific Behaviors - behaviors that only apply to specific request types (v0.6.0+)
 - Built-in behaviors: Logging, Validation, Exception Handling, Performance Tracking
 - Built on top of NestJS dependency injection
 - Zero runtime dependencies beyond NestJS
@@ -31,6 +32,55 @@ This library requires TypeScript decorators to be enabled. Add the following to 
   }
 }
 ```
+
+## Upgrading to v0.6.0
+
+Version 0.6.0 introduces **Type-Specific Pipeline Behaviors** - behaviors that only apply to specific request types.
+
+### What's New
+
+- New `@Handle()` decorator for the `handle` method to enable automatic request type inference
+- Behaviors can target specific command/query types without manual `instanceof` checks
+- Full backward compatibility - existing behaviors work unchanged
+
+### Type-Specific Behavior Example
+
+```typescript
+import { Injectable } from '@nestjs/common';
+import { IPipelineBehavior, PipelineBehavior, Handle } from '@rolandsall24/nest-mediator';
+import { CreateUserCommand } from './create-user.command';
+
+@Injectable()
+@PipelineBehavior({ priority: 100, scope: 'command' })
+export class CreateUserValidationBehavior
+  implements IPipelineBehavior<CreateUserCommand, void>
+{
+  @Handle()  // <-- Enables type inference from method signature
+  async handle(
+    request: CreateUserCommand,
+    next: () => Promise<void>,
+  ): Promise<void> {
+    // This behavior ONLY runs for CreateUserCommand
+    // No instanceof check needed!
+    if (!request.email.includes('@')) {
+      throw new Error('Invalid email');
+    }
+    return next();
+  }
+}
+```
+
+### How It Works
+
+1. Apply `@PipelineBehavior()` to the class and `@Handle()` to the `handle` method
+2. TypeScript's `emitDecoratorMetadata` emits type information for the method parameters
+3. The library reads this metadata at registration time and filters behaviors by request type
+
+### No Migration Required
+
+Existing behaviors without `@Handle()` on the method continue to work exactly as before - they apply to all requests matching their scope.
+
+---
 
 ## Upgrading to v0.5.0
 
@@ -707,6 +757,38 @@ Marks a class as a pipeline behavior.
   - `options.scope` - `'command'`, `'query'`, or `'all'` (default: `'all'`)
 - **Usage**: Apply to behavior classes that implement `IPipelineBehavior`
 
+#### `@Handle()`
+
+Method decorator that enables automatic request type inference for pipeline behaviors.
+
+- **Parameters**: None
+- **Usage**: Apply to the `handle` method to make the behavior type-specific
+
+```typescript
+// Generic behavior - applies to ALL requests in scope
+@Injectable()
+@PipelineBehavior({ priority: 0 })
+export class LoggingBehavior<TRequest, TResponse>
+  implements IPipelineBehavior<TRequest, TResponse> {
+  async handle(request: TRequest, next: () => Promise<TResponse>) {
+    // Runs for all requests
+    return next();
+  }
+}
+
+// Type-specific behavior - applies ONLY to CreateUserCommand
+@Injectable()
+@PipelineBehavior({ priority: 100, scope: 'command' })
+export class CreateUserValidationBehavior
+  implements IPipelineBehavior<CreateUserCommand, void> {
+  @Handle()  // <-- Enables type inference
+  async handle(request: CreateUserCommand, next: () => Promise<void>) {
+    // Only runs for CreateUserCommand
+    return next();
+  }
+}
+```
+
 #### `@SkipBehavior(behavior | behaviors[])`
 
 Excludes specific pipeline behaviors from a command or query.
@@ -1044,6 +1126,65 @@ export class AuthorizationBehavior<TRequest, TResponse>
 }
 ```
 
+### Type-Specific Behaviors
+
+By default, behaviors apply to all requests matching their scope. To create a behavior that only applies to specific request types, add `@Handle()` to the `handle` method:
+
+```typescript
+import { Injectable } from '@nestjs/common';
+import { IPipelineBehavior, PipelineBehavior, Handle } from '@rolandsall24/nest-mediator';
+import { CreateUserCommand } from './create-user.command';
+
+@Injectable()
+@PipelineBehavior({ priority: 95, scope: 'command' })
+export class CreateUserValidationBehavior
+  implements IPipelineBehavior<CreateUserCommand, void>
+{
+  @Handle()  // Enables type inference from method signature
+  async handle(
+    request: CreateUserCommand,
+    next: () => Promise<void>,
+  ): Promise<void> {
+    // This behavior ONLY runs for CreateUserCommand instances
+    // No manual instanceof check needed!
+
+    const errors: string[] = [];
+
+    if (!request.name || request.name.length < 2) {
+      errors.push('Name must be at least 2 characters');
+    }
+
+    if (!request.email || !request.email.includes('@')) {
+      errors.push('Valid email is required');
+    }
+
+    if (errors.length > 0) {
+      throw new Error(`Validation failed: ${errors.join(', ')}`);
+    }
+
+    return next();
+  }
+}
+```
+
+**How it works:**
+
+1. The `@Handle()` decorator on the `handle` method triggers TypeScript to emit `design:paramtypes` metadata
+2. At module initialization, the library reads this metadata to determine the request type (`CreateUserCommand`)
+3. During pipeline execution, the behavior is only included when `request instanceof CreateUserCommand` is true
+
+**Requirements:**
+- TypeScript `emitDecoratorMetadata: true` must be enabled in tsconfig.json
+- The request parameter must be a concrete class (not an interface or `any`)
+
+**Comparison:**
+
+| Without `@Handle()` | With `@Handle()` |
+|---------------------|------------------|
+| Behavior runs for ALL commands | Behavior runs ONLY for specified type |
+| Must use `instanceof` check inside handler | No `instanceof` check needed |
+| Generic `<TRequest, TResponse>` | Specific type like `<CreateUserCommand, void>` |
+
 ### Complete Behavior Execution Order Example
 
 With the following behaviors configured:
@@ -1096,6 +1237,124 @@ export class CreateUserCommand implements ICommand {
 
 // If validation fails, ValidationException is thrown with details
 ```
+
+### How `next()` Works in Pipeline Behaviors
+
+The `next()` function is a delegate that invokes the next behavior in the pipeline (or the final handler). Here's how it works:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        REQUEST FLOW (→)                                  │
+│                                                                          │
+│  Request                                                                 │
+│     │                                                                    │
+│     ▼                                                                    │
+│  ┌──────────────────────┐                                               │
+│  │  Behavior A          │  1. Pre-processing (before next())            │
+│  │  (priority: -100)    │     - Wrap in try/catch                       │
+│  │                      │     - Start timer                             │
+│  │  return next() ──────┼──►                                            │
+│  └──────────────────────┘                                               │
+│                              │                                           │
+│                              ▼                                           │
+│                         ┌──────────────────────┐                        │
+│                         │  Behavior B          │  2. Pre-processing     │
+│                         │  (priority: 0)       │     - Log request      │
+│                         │                      │                        │
+│                         │  return next() ──────┼──►                     │
+│                         └──────────────────────┘                        │
+│                                                    │                     │
+│                                                    ▼                     │
+│                                               ┌──────────────────────┐  │
+│                                               │  Behavior C          │  │
+│                                               │  (priority: 100)     │  │
+│                                               │                      │  │
+│                                               │  return next() ──────┼──►
+│                                               └──────────────────────┘  │
+│                                                                         │
+│                                                    │                     │
+│                                                    ▼                     │
+│                                               ┌──────────────────────┐  │
+│                                               │      HANDLER         │  │
+│                                               │   execute(request)   │  │
+│                                               │                      │  │
+│                                               │  return result ◄─────┼──┤
+│                                               └──────────────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                       RESPONSE FLOW (←)                                  │
+│                                                                          │
+│  ┌──────────────────────┐                                               │
+│  │  Behavior A          │  4. Post-processing (after next() returns)    │
+│  │  (priority: -100)    │     - Catch errors                            │
+│  │                      │     - Calculate duration                      │
+│  │  ◄── result ─────────┼──                                             │
+│  └──────────────────────┘                                               │
+│         │                    ▲                                           │
+│         ▼                    │                                           │
+│      Response           ┌──────────────────────┐                        │
+│                         │  Behavior B          │  3. Post-processing    │
+│                         │  (priority: 0)       │     - Log response     │
+│                         │                      │     - Log duration     │
+│                         │  ◄── result ─────────┼──                      │
+│                         └──────────────────────┘                        │
+│                                                    ▲                     │
+│                                                    │                     │
+│                                               ┌──────────────────────┐  │
+│                                               │  Behavior C          │  │
+│                                               │  (priority: 100)     │  │
+│                                               │                      │  │
+│                                               │  ◄── result ─────────┼──┤
+│                                               └──────────────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Code Example:**
+
+```typescript
+@Injectable()
+@PipelineBehavior({ priority: 0 })
+export class LoggingBehavior<TRequest, TResponse>
+  implements IPipelineBehavior<TRequest, TResponse>
+{
+  async handle(
+    request: TRequest,
+    next: () => Promise<TResponse>  // Delegate to next behavior/handler
+  ): Promise<TResponse> {
+    // ═══════════════════════════════════════════
+    // PRE-PROCESSING (runs BEFORE the handler)
+    // ═══════════════════════════════════════════
+    const start = Date.now();
+    console.log(`→ Handling ${request.constructor.name}...`);
+
+    // ═══════════════════════════════════════════
+    // CALL NEXT (invokes next behavior or handler)
+    // ═══════════════════════════════════════════
+    const response = await next();
+
+    // ═══════════════════════════════════════════
+    // POST-PROCESSING (runs AFTER the handler)
+    // ═══════════════════════════════════════════
+    const duration = Date.now() - start;
+    console.log(`← Handled ${request.constructor.name} in ${duration}ms`);
+
+    return response;
+  }
+}
+```
+
+**Key Points:**
+
+1. **`next()` is a function** that returns a `Promise` - you must `await` it
+2. **Code before `await next()`** runs during the request phase (pre-processing)
+3. **Code after `await next()`** runs during the response phase (post-processing)
+4. **Lower priority = outer wrapper** - executes first on request, last on response
+5. **Higher priority = inner wrapper** - executes last on request, first on response
+6. **If you don't call `next()`**, the handler never executes (useful for short-circuiting)
+7. **Exceptions propagate outward** through the `await next()` chain
 
 ### Pipeline Execution Order
 

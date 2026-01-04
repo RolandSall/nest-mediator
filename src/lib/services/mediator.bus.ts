@@ -19,6 +19,12 @@ import { SKIP_BEHAVIORS_METADATA } from '../decorators/skip-behavior.decorator.j
 interface RegisteredBehavior {
   type: Type<IPipelineBehavior<any, any>>;
   options: PipelineBehaviorOptions;
+  /**
+   * The specific request type this behavior applies to.
+   * Inferred from the handle method's first parameter when @PipelineBehavior()
+   * is applied to the method. When undefined, behavior applies to all requests.
+   */
+  requestType?: Function;
 }
 
 /**
@@ -95,20 +101,23 @@ export class MediatorBus {
    * Register a pipeline behavior
    * @param behaviorType - The behavior class
    * @param options - Behavior options (priority, scope)
+   * @param requestType - Optional specific request type this behavior applies to
    */
   registerPipelineBehavior(
     behaviorType: Type<IPipelineBehavior<any, any>>,
-    options: PipelineBehaviorOptions
+    options: PipelineBehaviorOptions,
+    requestType?: Function
   ): void {
-    this.pipelineBehaviors.push({ type: behaviorType, options });
+    this.pipelineBehaviors.push({ type: behaviorType, options, requestType });
 
     // Keep behaviors sorted by priority (lower first)
     this.pipelineBehaviors.sort(
       (a, b) => (a.options.priority ?? 0) - (b.options.priority ?? 0)
     );
 
+    const requestTypeInfo = requestType ? `, requestType: ${requestType.name}` : '';
     this.logger.log(
-      `Registered pipeline behavior: ${behaviorType.name} (priority: ${options.priority ?? 0}, scope: ${options.scope ?? 'all'})`
+      `Registered pipeline behavior: ${behaviorType.name} (priority: ${options.priority ?? 0}, scope: ${options.scope ?? 'all'}${requestTypeInfo})`
     );
   }
 
@@ -184,7 +193,7 @@ export class MediatorBus {
         requestClass,
       ) ?? [];
 
-    // Filter behaviors by scope and skip list
+    // Filter behaviors by scope, skip list, and request type
     const applicableBehaviors = this.pipelineBehaviors.filter((b) => {
       // Check scope
       const behaviorScope = b.options.scope ?? 'all';
@@ -195,7 +204,12 @@ export class MediatorBus {
         (skipType) => skipType === b.type,
       );
 
-      return scopeMatches && !shouldSkip;
+      // Check request type match (if behavior has a specific request type)
+      // If behavior has no requestType, it applies to all requests
+      // If behavior has a requestType, only apply if request is an instance of that type
+      const requestTypeMatches = !b.requestType || request instanceof (b.requestType as any);
+
+      return scopeMatches && !shouldSkip && requestTypeMatches;
     });
 
     // If no behaviors, just return the handler

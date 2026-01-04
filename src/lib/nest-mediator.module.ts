@@ -132,12 +132,37 @@ export class NestMediatorModule implements OnModuleInit {
       );
 
       if (behaviorMetadata) {
+        // Try to infer request type from handle method's first parameter
+        // This only works if @PipelineBehavior() decorator is applied to the handle method
+        const handleParamTypes = Reflect.getMetadata(
+          'design:paramtypes',
+          handlerType.prototype,
+          'handle'
+        );
+
+        // Get the first parameter type (the request type)
+        // Only use it if it's a concrete class (not Object, Function, or undefined)
+        let requestType: Function | undefined;
+        if (handleParamTypes && handleParamTypes[0]) {
+          const firstParamType = handleParamTypes[0];
+          // Exclude generic types like Object, Function that indicate no specific type
+          if (
+            firstParamType !== Object &&
+            firstParamType !== Function &&
+            typeof firstParamType === 'function'
+          ) {
+            requestType = firstParamType;
+          }
+        }
+
+        const requestTypeInfo = requestType ? `, requestType: ${requestType.name}` : '';
         console.log(
-          `[NestMediator] Registering pipeline behavior: ${handlerType.name} (priority: ${behaviorMetadata.priority ?? 0}, scope: ${behaviorMetadata.scope ?? 'all'})`
+          `[NestMediator] Registering pipeline behavior: ${handlerType.name} (priority: ${behaviorMetadata.priority ?? 0}, scope: ${behaviorMetadata.scope ?? 'all'}${requestTypeInfo})`
         );
         this.mediatorBus.registerPipelineBehavior(
           handlerType as Type<IPipelineBehavior<any, any>>,
-          behaviorMetadata
+          behaviorMetadata,
+          requestType
         );
       }
     }
