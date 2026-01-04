@@ -8,6 +8,8 @@ A lightweight CQRS (Command Query Responsibility Segregation) mediator pattern i
 - Type-safe handlers with TypeScript
 - Decorator-based handler registration
 - Automatic handler discovery and registration
+- **Pipeline Behaviors** for cross-cutting concerns (logging, validation, etc.)
+- Built-in behaviors: Logging, Validation, Exception Handling, Performance Tracking
 - Built on top of NestJS dependency injection
 - Zero runtime dependencies beyond NestJS
 
@@ -30,6 +32,58 @@ This library requires TypeScript decorators to be enabled. Add the following to 
 }
 ```
 
+## Upgrading to v0.5.0
+
+Version 0.5.0 introduces **Pipeline Behaviors** while maintaining backward compatibility. Existing code using `NestMediatorModule.forRoot()` will continue to work without changes.
+
+### What's New
+
+- Pipeline behaviors for cross-cutting concerns (logging, validation, etc.)
+- Built-in behaviors: `LoggingBehavior`, `ValidationBehavior`, `ExceptionHandlingBehavior`, `PerformanceBehavior`
+- New `forRootAsync()` method for enabling behaviors
+- Custom `HandlerNotFoundException` for better error handling
+
+### Breaking Change Notice
+
+The `send()` and `query()` methods now throw `HandlerNotFoundException` instead of a generic `Error` when no handler is registered. This is **backward compatible** since `HandlerNotFoundException` extends `Error`, but you may want to update your error handling for more specific catches:
+
+```typescript
+// Before (still works)
+try {
+  await mediator.send(command);
+} catch (error) {
+  if (error instanceof Error) {
+    console.log(error.message); // Works as before
+  }
+}
+
+// After (optional - for more specific handling)
+import { HandlerNotFoundException } from '@rolandsall24/nest-mediator';
+
+try {
+  await mediator.send(command);
+} catch (error) {
+  if (error instanceof HandlerNotFoundException) {
+    console.log(`No handler for: ${error.requestName}`);
+  }
+}
+```
+
+### No Migration Required
+
+If you're using `NestMediatorModule.forRoot()`, no changes are needed. Pipeline behaviors are **opt-in** via `forRootAsync()`:
+
+```typescript
+// Existing code - works exactly as before (no behaviors)
+NestMediatorModule.forRoot()
+
+// New - opt-in to behaviors
+NestMediatorModule.forRootAsync({
+  enableLogging: true,
+  enableValidation: true,
+})
+```
+
 ## Quick Start
 
 ### 1. Import the Module
@@ -44,6 +98,7 @@ import { GetUserQueryHandler } from './handlers/get-user-query.handler';
 
 @Module({
   imports: [
+    // Basic setup
     NestMediatorModule.forRoot(),
   ],
   providers: [
@@ -56,7 +111,26 @@ import { GetUserQueryHandler } from './handlers/get-user-query.handler';
 export class AppModule {}
 ```
 
-**How it works**: The module uses NestJS's `DiscoveryService` to automatically discover and register all providers decorated with `@CommandHandler` or `@QueryHandler`. Simply add your handlers to the module's `providers` array and they will be automatically registered with the mediator!
+Or with built-in pipeline behaviors enabled:
+
+```typescript
+@Module({
+  imports: [
+    NestMediatorModule.forRootAsync({
+      enableLogging: true,           // Log request handling with timing
+      enableValidation: true,        // Validate requests with class-validator
+      enableExceptionHandling: true, // Centralized exception logging
+    }),
+  ],
+  providers: [
+    CreateUserCommandHandler,
+    GetUserQueryHandler,
+  ],
+})
+export class AppModule {}
+```
+
+**How it works**: The module uses NestJS's `DiscoveryService` to automatically discover and register all providers decorated with `@CommandHandler`, `@QueryHandler`, or `@PipelineBehavior`. Simply add your handlers to the module's `providers` array and they will be automatically registered with the mediator!
 
 ## Usage
 
@@ -510,7 +584,12 @@ import { UserPersistenceAdapter } from './infrastructure/persistence/user/user-p
 
 @Module({
   imports: [
-    NestMediatorModule.forRoot(),
+    // Enable pipeline behaviors for logging, validation, and error handling
+    NestMediatorModule.forRootAsync({
+      enableLogging: true,
+      enableValidation: true,
+      enableExceptionHandling: true,
+    }),
   ],
   controllers: [UserController],
   providers: [
@@ -593,6 +672,16 @@ export interface IQueryHandler<TQuery extends IQuery, TResult = any> {
 }
 ```
 
+#### `IPipelineBehavior<TRequest, TResponse>`
+
+Interface for pipeline behaviors (cross-cutting concerns).
+
+```typescript
+export interface IPipelineBehavior<TRequest = any, TResponse = any> {
+  handle(request: TRequest, next: () => Promise<TResponse>): Promise<TResponse>;
+}
+```
+
 ### Decorators
 
 #### `@CommandHandler(command)`
@@ -608,6 +697,15 @@ Marks a class as a query handler.
 
 - **Parameters**: `query` - The query class this handler handles
 - **Usage**: Apply to handler classes that implement `IQueryHandler`
+
+#### `@PipelineBehavior(options?)`
+
+Marks a class as a pipeline behavior.
+
+- **Parameters**:
+  - `options.priority` - Execution order (lower numbers execute first, default: 0)
+  - `options.scope` - `'command'`, `'query'`, or `'all'` (default: `'all'`)
+- **Usage**: Apply to behavior classes that implement `IPipelineBehavior`
 
 ### Services
 
@@ -632,6 +730,164 @@ Executes a query through its registered handler.
 - **Parameters**: `query` - The query instance to execute
 - **Returns**: Promise that resolves with the query result
 - **Throws**: Error if no handler is registered for the query
+
+### Module Configuration
+
+#### `NestMediatorModule.forRoot()`
+
+Basic module registration with no built-in behaviors.
+
+#### `NestMediatorModule.forRootAsync(options)`
+
+Module registration with configuration options.
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enableLogging` | boolean | false | Enable request/response logging |
+| `enableValidation` | boolean | false | Enable class-validator validation |
+| `enableExceptionHandling` | boolean | false | Enable centralized exception logging |
+| `enablePerformanceTracking` | boolean | false | Enable slow request warnings |
+| `performanceThresholdMs` | number | 500 | Threshold for slow request warnings |
+| `behaviors` | Type[] | [] | Additional custom behaviors to register |
+
+## Pipeline Behaviors
+
+Pipeline behaviors allow you to add cross-cutting concerns (like logging, validation, caching) that execute around every command and query handler.
+
+### Enabling Built-in Behaviors
+
+```typescript
+import { Module } from '@nestjs/common';
+import { NestMediatorModule } from '@rolandsall24/nest-mediator';
+
+@Module({
+  imports: [
+    NestMediatorModule.forRootAsync({
+      enableLogging: true,           // Logs request handling with timing
+      enableValidation: true,        // Validates requests using class-validator
+      enableExceptionHandling: true, // Centralized exception logging
+      enablePerformanceTracking: true, // Warns on slow requests
+      performanceThresholdMs: 500,   // Threshold for slow request warnings
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+### Built-in Behaviors
+
+| Behavior | Priority | Description |
+|----------|----------|-------------|
+| `ExceptionHandlingBehavior` | -100 | Catches and logs all exceptions |
+| `LoggingBehavior` | 0 | Logs request handling with timing |
+| `PerformanceBehavior` | 10 | Warns when requests exceed threshold |
+| `ValidationBehavior` | 100 | Validates requests using class-validator |
+
+### Creating Custom Behaviors
+
+```typescript
+import { Injectable } from '@nestjs/common';
+import { IPipelineBehavior, PipelineBehavior } from '@rolandsall24/nest-mediator';
+
+@Injectable()
+@PipelineBehavior({ priority: 50, scope: 'all' })
+export class MyCustomBehavior<TRequest, TResponse>
+  implements IPipelineBehavior<TRequest, TResponse> {
+
+  async handle(
+    request: TRequest,
+    next: () => Promise<TResponse>
+  ): Promise<TResponse> {
+    // Pre-processing logic
+    console.log('Before handler:', request);
+
+    // Call the next behavior or handler
+    const response = await next();
+
+    // Post-processing logic
+    console.log('After handler:', response);
+
+    return response;
+  }
+}
+```
+
+### Behavior Options
+
+```typescript
+@PipelineBehavior({
+  priority: 50,      // Lower numbers execute first (outermost)
+  scope: 'command',  // 'command', 'query', or 'all'
+})
+```
+
+**Priority Guidelines:**
+- `-100 to -1`: Exception handling (outermost)
+- `0 to 99`: Logging, performance tracking
+- `100 to 199`: Validation
+- `200+`: Transaction/Unit of Work (innermost)
+
+### Registering Custom Behaviors
+
+Add your behavior to the module providers:
+
+```typescript
+@Module({
+  imports: [
+    NestMediatorModule.forRootAsync({
+      behaviors: [MyCustomBehavior],
+    }),
+  ],
+  providers: [
+    MyCustomBehavior, // Also add to providers for DI
+  ],
+})
+export class AppModule {}
+```
+
+Or use the `@PipelineBehavior` decorator and add to providers - it will be auto-discovered:
+
+```typescript
+@Module({
+  imports: [NestMediatorModule.forRoot()],
+  providers: [MyCustomBehavior], // Auto-discovered via decorator
+})
+export class AppModule {}
+```
+
+### Validation with class-validator
+
+When `enableValidation` is true, requests are validated using class-validator (if installed):
+
+```typescript
+import { IsEmail, IsString, MinLength } from 'class-validator';
+import { ICommand } from '@rolandsall24/nest-mediator';
+
+export class CreateUserCommand implements ICommand {
+  @IsEmail()
+  email: string;
+
+  @IsString()
+  @MinLength(2)
+  name: string;
+
+  constructor(email: string, name: string) {
+    this.email = email;
+    this.name = name;
+  }
+}
+
+// If validation fails, ValidationException is thrown with details
+```
+
+### Pipeline Execution Order
+
+With behaviors at priorities -100, 0, 10, 100:
+
+```
+Request → ExceptionHandling(-100) → Logging(0) → Performance(10) → Validation(100) → Handler
+Response ← ExceptionHandling(-100) ← Logging(0) ← Performance(10) ← Validation(100) ← Handler
+```
 
 ## Best Practices
 
