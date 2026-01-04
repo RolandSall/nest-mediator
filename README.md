@@ -40,7 +40,7 @@ Version 0.5.0 introduces **Pipeline Behaviors** while maintaining backward compa
 
 - Pipeline behaviors for cross-cutting concerns (logging, validation, etc.)
 - Built-in behaviors: `LoggingBehavior`, `ValidationBehavior`, `ExceptionHandlingBehavior`, `PerformanceBehavior`
-- New `forRootAsync()` method for enabling behaviors
+- New `forRoot()` method for enabling behaviors
 - Custom `HandlerNotFoundException` for better error handling
 
 ### Breaking Change Notice
@@ -71,14 +71,14 @@ try {
 
 ### No Migration Required
 
-If you're using `NestMediatorModule.forRoot()`, no changes are needed. Pipeline behaviors are **opt-in** via `forRootAsync()`:
+If you're using `NestMediatorModule.forRoot()`, no changes are needed. Pipeline behaviors are **opt-in** via `forRoot()`:
 
 ```typescript
 // Existing code - works exactly as before (no behaviors)
 NestMediatorModule.forRoot()
 
 // New - opt-in to behaviors
-NestMediatorModule.forRootAsync({
+NestMediatorModule.forRoot({
   enableLogging: true,
   enableValidation: true,
 })
@@ -116,7 +116,7 @@ Or with built-in pipeline behaviors enabled:
 ```typescript
 @Module({
   imports: [
-    NestMediatorModule.forRootAsync({
+    NestMediatorModule.forRoot({
       enableLogging: true,           // Log request handling with timing
       enableValidation: true,        // Validate requests with class-validator
       enableExceptionHandling: true, // Centralized exception logging
@@ -585,7 +585,7 @@ import { UserPersistenceAdapter } from './infrastructure/persistence/user/user-p
 @Module({
   imports: [
     // Enable pipeline behaviors for logging, validation, and error handling
-    NestMediatorModule.forRootAsync({
+    NestMediatorModule.forRoot({
       enableLogging: true,
       enableValidation: true,
       enableExceptionHandling: true,
@@ -747,7 +747,7 @@ Executes a query through its registered handler.
 
 Basic module registration with no built-in behaviors.
 
-#### `NestMediatorModule.forRootAsync(options)`
+#### `NestMediatorModule.forRoot(options)`
 
 Module registration with configuration options.
 
@@ -772,7 +772,7 @@ import { NestMediatorModule } from '@rolandsall24/nest-mediator';
 
 @Module({
   imports: [
-    NestMediatorModule.forRootAsync({
+    NestMediatorModule.forRoot({
       enableLogging: true,           // Logs request handling with timing
       enableValidation: true,        // Validates requests using class-validator
       enableExceptionHandling: true, // Centralized exception logging
@@ -844,7 +844,7 @@ Add your behavior to the module providers:
 ```typescript
 @Module({
   imports: [
-    NestMediatorModule.forRootAsync({
+    NestMediatorModule.forRoot({
       behaviors: [MyCustomBehavior],
     }),
   ],

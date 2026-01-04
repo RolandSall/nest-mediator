@@ -25,7 +25,7 @@ import {
 @Module({
   imports: [
     // Configure with pipeline behaviors enabled
-    NestMediatorModule.forRootAsync({
+    NestMediatorModule.forRoot({
       enableLogging: true, // Log all requests with timing
       enableValidation: true, // Validate requests with class-validator
       enableExceptionHandling: true, // Centralized exception logging

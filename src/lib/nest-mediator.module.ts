@@ -151,24 +151,19 @@ export class NestMediatorModule implements OnModuleInit {
   }
 
   /**
-   * Register the NestMediator module with default settings.
+   * Register the NestMediator module.
    * Handlers and behaviors are automatically discovered from the application's providers.
-   * @returns Dynamic module
-   */
-  static forRoot(): DynamicModule {
-    return this.forRootAsync({});
-  }
-
-  /**
-   * Register the NestMediator module with custom configuration.
    *
-   * @param options - Configuration options
+   * @param options - Optional configuration options
    * @returns Dynamic module
    *
    * @example
    * ```typescript
+   * // Basic setup (no built-in behaviors)
+   * NestMediatorModule.forRoot()
+   *
    * // Enable built-in behaviors
-   * NestMediatorModule.forRootAsync({
+   * NestMediatorModule.forRoot({
    *   enableLogging: true,
    *   enableValidation: true,
    *   enableExceptionHandling: true,
@@ -177,12 +172,12 @@ export class NestMediatorModule implements OnModuleInit {
    * })
    *
    * // With custom behaviors
-   * NestMediatorModule.forRootAsync({
+   * NestMediatorModule.forRoot({
    *   behaviors: [MyCustomBehavior],
    * })
    * ```
    */
-  static forRootAsync(options: NestMediatorModuleOptions = {}): DynamicModule {
+  static forRoot(options: NestMediatorModuleOptions = {}): DynamicModule {
     const builtInProviders: Type[] = [];
 
     // Add built-in behaviors based on options
