@@ -5,6 +5,7 @@ import { CreateUserCommand } from './users/commands/create-user.command';
 import { DeleteUserCommand } from './users/commands/delete-user.command';
 import { ProcessPaymentCommand } from './users/commands/process-payment.command';
 import { GetUserQuery } from './users/queries/get-user.query';
+import { PlaceOrderCommand } from './orders';
 import { AuthorizationService, CachingBehavior } from './behaviors';
 
 @Controller()
@@ -145,5 +146,55 @@ export class AppController {
   clearCache() {
     CachingBehavior.clearCache();
     return { message: 'Cache cleared' };
+  }
+
+  // =========================================
+  // ORDER EVENT ENDPOINTS (for testing events)
+  // =========================================
+
+  /**
+   * POST /orders - Place an order using PlaceOrderCommand
+   *
+   * This demonstrates the recommended pattern:
+   * 1. Controller sends a command to the mediator
+   * 2. Command handler processes the order
+   * 3. Command handler publishes OrderPlacedEvent after success
+   * 4. Critical consumers run sequentially, non-critical run in background
+   *
+   * Test with:
+   * curl -X POST http://localhost:3000/orders \
+   *   -H "Content-Type: application/json" \
+   *   -d '{"customerId":"cust-123","items":[{"productId":"prod-1","quantity":2},{"productId":"prod-2","quantity":1}],"total":149.99}'
+   */
+  @Post('orders')
+  async placeOrder(
+    @Body()
+    body: {
+      customerId: string;
+      items: { productId: string; quantity: number }[];
+      total: number;
+    },
+  ) {
+    const command = new PlaceOrderCommand(
+      body.customerId,
+      body.items,
+      body.total,
+    );
+
+    await this.mediatorBus.send(command);
+
+    return {
+      message: 'Order placed successfully',
+    };
+  }
+
+  /**
+   * GET /events - Get all registered events and their handlers
+   * Test with: curl http://localhost:3000/events
+   */
+  @Get('events')
+  getRegisteredEvents() {
+      this.mediatorBus.getRegisteredEvents()
+    return this.mediatorBus.getRegisteredEvents();
   }
 }

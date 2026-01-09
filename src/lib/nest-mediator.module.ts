@@ -1,10 +1,17 @@
 import { DynamicModule, Module, Type, OnModuleInit } from '@nestjs/common';
 import { Reflector, DiscoveryService, DiscoveryModule } from '@nestjs/core';
 import { MediatorBus } from './services/index.js';
+import { CommandBus } from './services/command.bus.js';
+import { QueryBus } from './services/query.bus.js';
+import { EventBus } from './services/event.bus.js';
+import { PipelineOrchestrator } from './services/pipeline.orchestrator.js';
 import {
   COMMAND_HANDLER_METADATA,
   QUERY_HANDLER_METADATA,
   PIPELINE_BEHAVIOR_METADATA,
+  EVENT_HANDLER_METADATA,
+  EVENT_CRITICALITY_METADATA,
+  EventCriticalityMetadata,
 } from './decorators/index.js';
 import {
   ICommand,
@@ -13,6 +20,8 @@ import {
   IQueryHandler,
   IPipelineBehavior,
   PipelineBehaviorOptions,
+  IEvent,
+  IEventConsumer,
 } from './interfaces/index.js';
 import {
   LoggingBehavior,
@@ -165,6 +174,33 @@ export class NestMediatorModule implements OnModuleInit {
           requestType
         );
       }
+
+      // Register event handlers
+      const eventMetadata = this.reflector.get<Type<IEvent>>(
+        EVENT_HANDLER_METADATA,
+        handlerType
+      );
+
+      if (eventMetadata) {
+        // Get criticality metadata (if any)
+        const criticalityMetadata = this.reflector.get<EventCriticalityMetadata>(
+          EVENT_CRITICALITY_METADATA,
+          handlerType
+        );
+
+        const criticalityInfo = criticalityMetadata
+          ? ` (criticality: ${criticalityMetadata.criticality}, order: ${criticalityMetadata.order})`
+          : ' (criticality: non-critical)';
+
+        console.log(
+          `[NestMediator] Registering event handler: ${handlerType.name} for event: ${eventMetadata.name}${criticalityInfo}`
+        );
+        this.mediatorBus.registerEventHandler(
+          eventMetadata,
+          handlerType as Type<IEventConsumer<any>>,
+          criticalityMetadata
+        );
+      }
     }
   }
 
@@ -214,6 +250,10 @@ export class NestMediatorModule implements OnModuleInit {
       module: NestMediatorModule,
       imports: [DiscoveryModule],
       providers: [
+        PipelineOrchestrator,
+        CommandBus,
+        QueryBus,
+        EventBus,
         MediatorBus,
         Reflector,
         ...builtInProviders,

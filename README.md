@@ -4,12 +4,13 @@ A lightweight CQRS (Command Query Responsibility Segregation) mediator pattern i
 
 ## Features
 
-- Clean separation between Commands and Queries
+- Clean separation between Commands, Queries, and Events
 - Type-safe handlers with TypeScript
 - Decorator-based handler registration
 - Automatic handler discovery and registration
 - Pipeline Behaviors for cross-cutting concerns (logging, validation, etc.)
 - Type-Specific Behaviors - behaviors that only apply to specific request types (v0.6.0+)
+- **Domain Events with Critical/Non-Critical consumers (v0.7.0+)**
 - Built-in behaviors: Logging, Validation, Exception Handling, Performance Tracking
 - Built on top of NestJS dependency injection
 - Zero runtime dependencies beyond NestJS
@@ -32,6 +33,40 @@ This library requires TypeScript decorators to be enabled. Add the following to 
   }
 }
 ```
+
+## Upgrading to v0.7.0
+
+Version 0.7.0 introduces **Domain Events** with Critical and Non-Critical consumer support.
+
+### What's New
+
+- `IEvent` interface for domain events
+- `IEventConsumer<TEvent>` interface for event consumers
+- `@EventHandler(EventClass)` decorator to register consumers
+- `@Critical({ order: n })` decorator for critical consumers (run sequentially)
+- `@NonCritical()` decorator for non-critical consumers (fire-and-forget)
+- `mediatorBus.publish(event)` method to publish events
+- `EventCriticality` enum (`CRITICAL`, `NON_CRITICAL`)
+- Internal architecture refactoring (MediatorBus now delegates to CommandBus, QueryBus, EventBus)
+
+### Backward Compatibility
+
+- **`IEventHandler` renamed to `IEventConsumer`**: `IEventHandler` is now a deprecated type alias. Update your imports:
+
+```typescript
+// Before
+import { IEventHandler } from '@rolandsall24/nest-mediator';
+class MyHandler implements IEventHandler<MyEvent> { ... }
+
+// After (recommended)
+import { IEventConsumer } from '@rolandsall24/nest-mediator';
+class MyConsumer implements IEventConsumer<MyEvent> { ... }
+```
+
+- **MediatorBus API unchanged**: The `send()`, `query()`, and `publish()` methods work exactly as before
+- **No breaking changes**: Existing command/query code continues to work without modifications
+
+---
 
 ## Upgrading to v0.6.0
 
@@ -81,58 +116,6 @@ export class CreateUserValidationBehavior
 Existing behaviors without `@Handle()` on the method continue to work exactly as before - they apply to all requests matching their scope.
 
 ---
-
-## Upgrading to v0.5.0
-
-Version 0.5.0 introduces **Pipeline Behaviors** while maintaining backward compatibility. Existing code using `NestMediatorModule.forRoot()` will continue to work without changes.
-
-### What's New
-
-- Pipeline behaviors for cross-cutting concerns (logging, validation, etc.)
-- Built-in behaviors: `LoggingBehavior`, `ValidationBehavior`, `ExceptionHandlingBehavior`, `PerformanceBehavior`
-- New `forRoot()` method for enabling behaviors
-- Custom `HandlerNotFoundException` for better error handling
-
-### Breaking Change Notice
-
-The `send()` and `query()` methods now throw `HandlerNotFoundException` instead of a generic `Error` when no handler is registered. This is **backward compatible** since `HandlerNotFoundException` extends `Error`, but you may want to update your error handling for more specific catches:
-
-```typescript
-// Before (still works)
-try {
-  await mediator.send(command);
-} catch (error) {
-  if (error instanceof Error) {
-    console.log(error.message); // Works as before
-  }
-}
-
-// After (optional - for more specific handling)
-import { HandlerNotFoundException } from '@rolandsall24/nest-mediator';
-
-try {
-  await mediator.send(command);
-} catch (error) {
-  if (error instanceof HandlerNotFoundException) {
-    console.log(`No handler for: ${error.requestName}`);
-  }
-}
-```
-
-### No Migration Required
-
-If you're using `NestMediatorModule.forRoot()`, no changes are needed. Pipeline behaviors are **opt-in** via `forRoot()`:
-
-```typescript
-// Existing code - works exactly as before (no behaviors)
-NestMediatorModule.forRoot()
-
-// New - opt-in to behaviors
-NestMediatorModule.forRoot({
-  enableLogging: true,
-  enableValidation: true,
-})
-```
 
 ## Quick Start
 
@@ -335,6 +318,178 @@ export class UserController {
     return user;
   }
 }
+```
+
+### Domain Events
+
+Domain events notify other parts of the system when something important happens. They support two consumer types:
+
+- **Critical consumers**: Run sequentially in order. Must succeed for the operation to complete.
+- **Non-critical consumers**: Run in parallel after critical consumers complete. Fire-and-forget.
+
+#### 1. Define an Event
+
+```typescript
+import { IEvent } from '@rolandsall24/nest-mediator';
+
+export class OrderPlacedEvent implements IEvent {
+  constructor(
+    public readonly orderId: string,
+    public readonly customerId: string,
+    public readonly items: { productId: string; quantity: number }[],
+    public readonly total: number,
+  ) {}
+}
+```
+
+#### 2. Create Event Consumers
+
+**Critical consumer** (must succeed, runs in order):
+
+```typescript
+import { Injectable, Logger } from '@nestjs/common';
+import { EventHandler, IEventConsumer, Critical } from '@rolandsall24/nest-mediator';
+import { OrderPlacedEvent } from './order-placed.event';
+
+@Injectable()
+@EventHandler(OrderPlacedEvent)
+@Critical({ order: 1 })  // Runs first among critical consumers
+export class ValidateInventoryConsumer implements IEventConsumer<OrderPlacedEvent> {
+  private readonly logger = new Logger(ValidateInventoryConsumer.name);
+
+  async handle(event: OrderPlacedEvent): Promise<void> {
+    this.logger.log(`Validating inventory for order ${event.orderId}`);
+    // Validate all items are in stock
+    // Throw error if validation fails - stops the event processing
+  }
+}
+
+@Injectable()
+@EventHandler(OrderPlacedEvent)
+@Critical({ order: 2 })  // Runs second
+export class ReserveInventoryConsumer implements IEventConsumer<OrderPlacedEvent> {
+  async handle(event: OrderPlacedEvent): Promise<void> {
+    // Reserve inventory for the order
+  }
+}
+```
+
+**Non-critical consumer** (fire-and-forget):
+
+```typescript
+import { Injectable, Logger } from '@nestjs/common';
+import { EventHandler, IEventConsumer, NonCritical } from '@rolandsall24/nest-mediator';
+import { OrderPlacedEvent } from './order-placed.event';
+
+@Injectable()
+@EventHandler(OrderPlacedEvent)
+@NonCritical()  // Runs in background after critical consumers
+export class SendOrderConfirmationConsumer implements IEventConsumer<OrderPlacedEvent> {
+  private readonly logger = new Logger(SendOrderConfirmationConsumer.name);
+
+  async handle(event: OrderPlacedEvent): Promise<void> {
+    this.logger.log(`Sending confirmation email for order ${event.orderId}`);
+    // Send email - failures are logged but don't affect the order
+  }
+}
+
+// Consumers without @Critical or @NonCritical default to non-critical
+@Injectable()
+@EventHandler(OrderPlacedEvent)
+export class TrackAnalyticsConsumer implements IEventConsumer<OrderPlacedEvent> {
+  async handle(event: OrderPlacedEvent): Promise<void> {
+    // Track analytics - non-critical by default
+  }
+}
+```
+
+#### 3. Publish Events from Command Handlers
+
+The recommended pattern is to publish domain events from command handlers after the main operation succeeds:
+
+```typescript
+import { Injectable, Logger } from '@nestjs/common';
+import { CommandHandler, ICommandHandler, MediatorBus } from '@rolandsall24/nest-mediator';
+import { PlaceOrderCommand } from './place-order.command';
+import { OrderPlacedEvent } from '../events/order-placed.event';
+
+@Injectable()
+@CommandHandler(PlaceOrderCommand)
+export class PlaceOrderHandler implements ICommandHandler<PlaceOrderCommand> {
+  private readonly logger = new Logger(PlaceOrderHandler.name);
+
+  constructor(private readonly mediatorBus: MediatorBus) {}
+
+  async execute(command: PlaceOrderCommand): Promise<void> {
+    const orderId = `order-${Date.now()}`;
+
+    // 1. Process the order (validate, save to DB, etc.)
+    this.logger.log(`Processing order ${orderId}`);
+    await this.processOrder(orderId, command);
+
+    // 2. Publish domain event after successful processing
+    // Critical consumers run sequentially, non-critical run in background
+    const result = await this.mediatorBus.publish(
+      new OrderPlacedEvent(
+        orderId,
+        command.customerId,
+        command.items,
+        command.total,
+      ),
+    );
+
+    this.logger.log(
+      `Order ${orderId} completed. Critical: ${result.criticalSucceeded}, Non-critical dispatched: ${result.nonCriticalDispatched}`,
+    );
+  }
+
+  private async processOrder(orderId: string, command: PlaceOrderCommand): Promise<void> {
+    // Order processing logic here
+  }
+}
+```
+
+#### 4. Event Execution Flow
+
+```
+publish(OrderPlacedEvent)
+    │
+    ├─► Critical Consumers (sequential, awaited)
+    │   ├─► ValidateInventoryConsumer (order: 1)
+    │   ├─► ReserveInventoryConsumer (order: 2)
+    │   └─► CreateOrderRecordConsumer (order: 3)
+    │
+    │   If any critical consumer fails → throw error, stop processing
+    │
+    └─► Non-Critical Consumers (parallel, fire-and-forget)
+        ├─► SendOrderConfirmationConsumer
+        ├─► NotifyWarehouseConsumer
+        └─► TrackAnalyticsConsumer
+
+        Failures logged but don't affect the result
+```
+
+#### 5. Register Event Consumers
+
+Add consumers to your module providers - they're auto-discovered via `@EventHandler`:
+
+```typescript
+@Module({
+  imports: [NestMediatorModule.forRoot()],
+  providers: [
+    // Command handlers
+    PlaceOrderHandler,
+
+    // Event consumers - auto-discovered
+    ValidateInventoryConsumer,
+    ReserveInventoryConsumer,
+    CreateOrderRecordConsumer,
+    SendOrderConfirmationConsumer,
+    NotifyWarehouseConsumer,
+    TrackAnalyticsConsumer,
+  ],
+})
+export class AppModule {}
 ```
 
 ## Complete Example
@@ -732,6 +887,47 @@ export interface IPipelineBehavior<TRequest = any, TResponse = any> {
 }
 ```
 
+#### `IEvent`
+
+Marker interface for domain events.
+
+```typescript
+export interface IEvent {}
+```
+
+#### `IEventConsumer<TEvent>`
+
+Interface for event consumers.
+
+```typescript
+export interface IEventConsumer<TEvent extends IEvent> {
+  handle(event: TEvent): Promise<void>;
+}
+```
+
+#### `EventPublishResult`
+
+Result returned by `publish()`.
+
+```typescript
+export interface EventPublishResult {
+  totalHandlers: number;
+  criticalSucceeded: number;
+  nonCriticalDispatched: number;
+}
+```
+
+#### `EventCriticality`
+
+Enum for event consumer criticality.
+
+```typescript
+export enum EventCriticality {
+  CRITICAL = 'critical',
+  NON_CRITICAL = 'non-critical',
+}
+```
+
 ### Decorators
 
 #### `@CommandHandler(command)`
@@ -799,11 +995,36 @@ Excludes specific pipeline behaviors from a command or query.
 - **Usage**: Apply to command or query classes
 - **Works with**: Both built-in behaviors and custom behaviors
 
+#### `@EventHandler(event)`
+
+Marks a class as an event consumer.
+
+- **Parameters**: `event` - The event class this consumer handles
+- **Usage**: Apply to consumer classes that implement `IEventConsumer`
+
+#### `@Critical(options?)`
+
+Marks an event consumer as critical. Critical consumers run sequentially in order.
+
+- **Parameters**:
+  - `options.order` - Execution order among critical consumers (lower numbers first, default: 0)
+- **Usage**: Apply to consumer classes alongside `@EventHandler`
+- **Behavior**: If a critical consumer fails, remaining critical consumers are skipped and non-critical consumers don't run
+
+#### `@NonCritical()`
+
+Marks an event consumer as non-critical. Non-critical consumers run in parallel after critical consumers complete.
+
+- **Parameters**: None
+- **Usage**: Apply to consumer classes alongside `@EventHandler`
+- **Behavior**: Fire-and-forget - failures are logged but don't affect the publish result
+- **Note**: Consumers without `@Critical` or `@NonCritical` default to non-critical
+
 ### Services
 
 #### `MediatorBus`
 
-The main service for sending commands and queries.
+The main service for sending commands, queries, and events.
 
 ##### Methods
 
@@ -813,7 +1034,7 @@ Sends a command to its registered handler.
 
 - **Parameters**: `command` - The command instance to execute
 - **Returns**: Promise that resolves when the command is executed
-- **Throws**: Error if no handler is registered for the command
+- **Throws**: `HandlerNotFoundException` if no handler is registered for the command
 
 **`query<TQuery, TResult>(query: TQuery): Promise<TResult>`**
 
@@ -821,7 +1042,18 @@ Executes a query through its registered handler.
 
 - **Parameters**: `query` - The query instance to execute
 - **Returns**: Promise that resolves with the query result
-- **Throws**: Error if no handler is registered for the query
+- **Throws**: `HandlerNotFoundException` if no handler is registered for the query
+
+**`publish<TEvent>(event: TEvent): Promise<EventPublishResult>`**
+
+Publishes an event to all registered consumers.
+
+- **Parameters**: `event` - The event instance to publish
+- **Returns**: Promise with `EventPublishResult` containing:
+  - `totalHandlers` - Total number of consumers
+  - `criticalSucceeded` - Number of critical consumers that completed
+  - `nonCriticalDispatched` - Number of non-critical consumers dispatched
+- **Throws**: Error if any critical consumer fails
 
 ### Module Configuration
 

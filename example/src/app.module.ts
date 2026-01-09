@@ -8,9 +8,20 @@ import { NestMediatorModule } from '@rolandsall24/nest-mediator';
 import { CreateUserHandler } from './users/commands/create-user.handler';
 import { DeleteUserHandler } from './users/commands/delete-user.handler';
 import { ProcessPaymentHandler } from './users/commands/process-payment.handler';
+import { PlaceOrderHandler } from './orders';
 
 // Query handlers
 import { GetUserHandler } from './users/queries/get-user.handler';
+
+// Event handlers
+import {
+  ValidateInventoryHandler,
+  ReserveInventoryHandler,
+  CreateOrderRecordHandler,
+  SendOrderConfirmationHandler,
+  NotifyWarehouseHandler,
+  TrackOrderAnalyticsHandler,
+} from './events';
 
 // Custom behaviors and services
 import {
@@ -42,6 +53,7 @@ import {
     CreateUserHandler,
     DeleteUserHandler,
     ProcessPaymentHandler,
+    PlaceOrderHandler,
 
     // Query handlers
     GetUserHandler,
@@ -66,6 +78,22 @@ import {
     RetryBehavior,
     AuthorizationBehavior,
     CreateUserValidationBehavior,
+
+    // Event handlers - auto-discovered via @EventHandler decorator
+    // Critical handlers (run sequentially in order):
+    //   order 1: ValidateInventoryHandler
+    //   order 2: ReserveInventoryHandler
+    //   order 3: CreateOrderRecordHandler
+    // Non-critical handlers (run in parallel, fire-and-forget):
+    //   SendOrderConfirmationHandler
+    //   NotifyWarehouseHandler
+    //   TrackOrderAnalyticsHandler
+    ValidateInventoryHandler,
+    ReserveInventoryHandler,
+    CreateOrderRecordHandler,
+    SendOrderConfirmationHandler,
+    NotifyWarehouseHandler,
+    TrackOrderAnalyticsHandler,
   ],
 })
 export class AppModule {}

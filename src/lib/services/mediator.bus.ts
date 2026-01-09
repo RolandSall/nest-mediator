@@ -1,39 +1,30 @@
-import { Injectable, Logger, Type } from '@nestjs/common';
-import { ModuleRef, Reflector } from '@nestjs/core';
+import { Injectable, Type } from '@nestjs/common';
 import {
   ICommand,
   ICommandHandler,
   IQuery,
   IQueryHandler,
+  IEvent,
+  IEventConsumer,
+  IMediator,
+  EventPublishResult,
+  EventCriticalityMetadata,
 } from '../interfaces/index.js';
 import {
   IPipelineBehavior,
   PipelineBehaviorOptions,
 } from '../interfaces/pipeline-behavior.interface.js';
-import { HandlerNotFoundException } from '../exceptions/handler-not-found.exception.js';
-import { SKIP_BEHAVIORS_METADATA } from '../decorators/skip-behavior.decorator.js';
+import { CommandBus } from './command.bus.js';
+import { QueryBus } from './query.bus.js';
+import { EventBus } from './event.bus.js';
+import { PipelineOrchestrator } from './pipeline.orchestrator.js';
 
 /**
- * Registered behavior with its metadata
- */
-interface RegisteredBehavior {
-  type: Type<IPipelineBehavior<any, any>>;
-  options: PipelineBehaviorOptions;
-  /**
-   * The specific request type this behavior applies to.
-   * Inferred from the handle method's first parameter when @PipelineBehavior()
-   * is applied to the method. When undefined, behavior applies to all requests.
-   */
-  requestType?: Function;
-}
-
-/**
- * Central mediator bus for dispatching commands and queries.
- * Supports pipeline behaviors for cross-cutting concerns.
+ * Central mediator bus for dispatching commands, queries, and events.
+ * Acts as a facade delegating to specialized buses.
  *
  * @example
  * ```typescript
- * // In a controller
  * @Controller('users')
  * export class UserController {
  *   constructor(private readonly mediator: MediatorBus) {}
@@ -51,17 +42,41 @@ interface RegisteredBehavior {
  * ```
  */
 @Injectable()
-export class MediatorBus {
-  private readonly logger = new Logger('MediatorBus');
-
-  private commandHandlers = new Map<string, Type<ICommandHandler<any>>>();
-  private queryHandlers = new Map<string, Type<IQueryHandler<any, any>>>();
-  private pipelineBehaviors: RegisteredBehavior[] = [];
-
+export class MediatorBus implements IMediator {
   constructor(
-    private readonly moduleRef: ModuleRef,
-    private readonly reflector: Reflector,
+    private readonly commandBus: CommandBus,
+    private readonly queryBus: QueryBus,
+    private readonly eventBus: EventBus,
+    private readonly pipelineOrchestrator: PipelineOrchestrator,
   ) {}
+
+  /**
+   * Send a command to its handler through the pipeline
+   * @param command - The command instance
+   */
+  async send<TCommand extends ICommand>(command: TCommand): Promise<void> {
+    return this.commandBus.send(command);
+  }
+
+  /**
+   * Execute a query through its handler and the pipeline
+   * @param query - The query instance
+   * @returns Promise with the result
+   */
+  async query<TQuery extends IQuery, TResult = any>(
+    query: TQuery
+  ): Promise<TResult> {
+    return this.queryBus.query(query);
+  }
+
+  /**
+   * Publish an event to all its consumers
+   * @param event - The event instance
+   * @returns Promise with the publish result
+   */
+  async publish<TEvent extends IEvent>(event: TEvent): Promise<EventPublishResult> {
+    return this.eventBus.publish(event);
+  }
 
   /**
    * Register a command handler
@@ -72,13 +87,7 @@ export class MediatorBus {
     command: Type<ICommand>,
     handler: Type<ICommandHandler<any>>
   ): void {
-    const commandName = command.name;
-    if (this.commandHandlers.has(commandName)) {
-      throw new Error(
-        `Command handler for ${commandName} is already registered`
-      );
-    }
-    this.commandHandlers.set(commandName, handler);
+    this.commandBus.registerCommandHandler(command, handler);
   }
 
   /**
@@ -90,11 +99,7 @@ export class MediatorBus {
     query: Type<IQuery>,
     handler: Type<IQueryHandler<any, any>>
   ): void {
-    const queryName = query.name;
-    if (this.queryHandlers.has(queryName)) {
-      throw new Error(`Query handler for ${queryName} is already registered`);
-    }
-    this.queryHandlers.set(queryName, handler);
+    this.queryBus.registerQueryHandler(query, handler);
   }
 
   /**
@@ -108,150 +113,51 @@ export class MediatorBus {
     options: PipelineBehaviorOptions,
     requestType?: Function
   ): void {
-    this.pipelineBehaviors.push({ type: behaviorType, options, requestType });
-
-    // Keep behaviors sorted by priority (lower first)
-    this.pipelineBehaviors.sort(
-      (a, b) => (a.options.priority ?? 0) - (b.options.priority ?? 0)
-    );
-
-    const requestTypeInfo = requestType ? `, requestType: ${requestType.name}` : '';
-    this.logger.log(
-      `Registered pipeline behavior: ${behaviorType.name} (priority: ${options.priority ?? 0}, scope: ${options.scope ?? 'all'}${requestTypeInfo})`
-    );
+    this.pipelineOrchestrator.registerBehavior(behaviorType, options, requestType);
   }
 
   /**
-   * Send a command to its handler through the pipeline
-   * @param command - The command instance
-   * @returns Promise<void>
+   * Register an event consumer
+   * @param event - The event class
+   * @param handler - The consumer class
+   * @param criticalityMetadata - Criticality metadata
    */
-  async send<TCommand extends ICommand>(command: TCommand): Promise<void> {
-    const commandName = command.constructor.name;
-    const handlerType = this.commandHandlers.get(commandName);
-
-    if (!handlerType) {
-      throw new HandlerNotFoundException(commandName, 'command');
-    }
-
-    const handler = this.moduleRef.get<ICommandHandler<TCommand>>(handlerType, {
-      strict: false,
-    });
-
-    // Build and execute pipeline
-    const pipeline = this.buildPipeline<TCommand, void>(
-      command,
-      'command',
-      () => handler.execute(command)
-    );
-
-    await pipeline();
+  registerEventHandler(
+    event: Type<IEvent>,
+    handler: Type<IEventConsumer<any>>,
+    criticalityMetadata?: EventCriticalityMetadata
+  ): void {
+    this.eventBus.registerEventHandler(event, handler, criticalityMetadata);
   }
 
   /**
-   * Execute a query through its handler and the pipeline
-   * @param query - The query instance
-   * @returns Promise with the result
-   */
-  async query<TQuery extends IQuery, TResult = any>(
-    query: TQuery
-  ): Promise<TResult> {
-    const queryName = query.constructor.name;
-    const handlerType = this.queryHandlers.get(queryName);
-
-    if (!handlerType) {
-      throw new HandlerNotFoundException(queryName, 'query');
-    }
-
-    const handler = this.moduleRef.get<IQueryHandler<TQuery, TResult>>(
-      handlerType,
-      { strict: false }
-    );
-
-    // Build and execute pipeline
-    const pipeline = this.buildPipeline<TQuery, TResult>(query, 'query', () =>
-      handler.execute(query)
-    );
-
-    return pipeline();
-  }
-
-  /**
-   * Build a pipeline of behaviors around the handler
-   * Uses reduceRight to create a chain where the first behavior wraps all others
-   */
-  private buildPipeline<TRequest, TResponse>(
-    request: TRequest,
-    scope: 'command' | 'query',
-    handler: () => Promise<TResponse>
-  ): () => Promise<TResponse> {
-    // Get behaviors to skip from request metadata
-    const requestClass = (request as object).constructor;
-    const behaviorsToSkip: Type<IPipelineBehavior>[] =
-      this.reflector.get<Type<IPipelineBehavior>[]>(
-        SKIP_BEHAVIORS_METADATA,
-        requestClass,
-      ) ?? [];
-
-    // Filter behaviors by scope, skip list, and request type
-    const applicableBehaviors = this.pipelineBehaviors.filter((b) => {
-      // Check scope
-      const behaviorScope = b.options.scope ?? 'all';
-      const scopeMatches = behaviorScope === 'all' || behaviorScope === scope;
-
-      // Check if this behavior should be skipped
-      const shouldSkip = behaviorsToSkip.some(
-        (skipType) => skipType === b.type,
-      );
-
-      // Check request type match (if behavior has a specific request type)
-      // If behavior has no requestType, it applies to all requests
-      // If behavior has a requestType, only apply if request is an instance of that type
-      const requestTypeMatches = !b.requestType || request instanceof (b.requestType as any);
-
-      return scopeMatches && !shouldSkip && requestTypeMatches;
-    });
-
-    // If no behaviors, just return the handler
-    if (applicableBehaviors.length === 0) {
-      return handler;
-    }
-
-    // Build the pipeline from right to left (innermost to outermost)
-    // The last behavior in the array wraps the handler directly
-    // The first behavior in the array is the outermost wrapper
-    return applicableBehaviors.reduceRight<() => Promise<TResponse>>(
-      (next, registeredBehavior) => {
-        return async () => {
-          const behavior = this.moduleRef.get<
-            IPipelineBehavior<TRequest, TResponse>
-          >(registeredBehavior.type, { strict: false });
-
-          return behavior.handle(request, next);
-        };
-      },
-      handler
-    );
-  }
-
-  /**
-   * Get registered command handler names (for debugging)
+   * Get registered command names (for debugging)
    */
   getRegisteredCommands(): string[] {
-    return Array.from(this.commandHandlers.keys());
+    return this.commandBus.getRegisteredCommands();
   }
 
   /**
-   * Get registered query handler names (for debugging)
+   * Get registered query names (for debugging)
    */
   getRegisteredQueries(): string[] {
-    return Array.from(this.queryHandlers.keys());
+    return this.queryBus.getRegisteredQueries();
   }
 
   /**
    * Get registered behavior names (for debugging)
    */
   getRegisteredBehaviors(): string[] {
-    return this.pipelineBehaviors.map((b) => b.type.name);
+    return this.pipelineOrchestrator.getRegisteredBehaviors();
+  }
+
+  /**
+   * Get registered events and their consumers (for debugging)
+   */
+  getRegisteredEvents(): {
+    event: string;
+    handlers: { name: string; criticality: string; order: number }[];
+  }[] {
+    return this.eventBus.getRegisteredEvents();
   }
 }
