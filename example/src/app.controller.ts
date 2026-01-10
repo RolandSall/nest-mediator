@@ -161,10 +161,39 @@ export class AppController {
    * 3. Command handler publishes OrderPlacedEvent after success
    * 4. Critical consumers run sequentially, non-critical run in background
    *
-   * Test with:
-   * curl -X POST http://localhost:3000/orders \
-   *   -H "Content-Type: application/json" \
-   *   -d '{"customerId":"cust-123","items":[{"productId":"prod-1","quantity":2},{"productId":"prod-2","quantity":1}],"total":149.99}'
+   * Set simulatePaymentFailure=true to test the saga compensation pattern.
+   *
+   * ============================================================
+   * TEST SCENARIOS:
+   * ============================================================
+   *
+   * 1. SUCCESSFUL ORDER (all critical consumers succeed):
+   *    curl -X POST http://localhost:3000/orders \
+   *      -H "Content-Type: application/json" \
+   *      -d '{
+   *        "customerId": "cust-123",
+   *        "items": [{"productId": "prod-1", "quantity": 2}],
+   *        "total": 99.99
+   *      }'
+   *
+   * 2. FAILED ORDER WITH COMPENSATION (payment fails, triggers rollback):
+   *    curl -X POST http://localhost:3000/orders \
+   *      -H "Content-Type: application/json" \
+   *      -d '{
+   *        "customerId": "cust-123",
+   *        "items": [{"productId": "prod-1", "quantity": 2}],
+   *        "total": 99.99,
+   *        "simulatePaymentFailure": true
+   *      }'
+   *
+   *    Expected flow:
+   *    - ValidateInventory (order 1) ✓
+   *    - ReserveInventory (order 2) ✓ [has compensate()]
+   *    - CreateOrderRecord (order 3) ✓ [has compensate()]
+   *    - ChargePayment (order 4) ✗ FAILS
+   *    - Compensation runs in reverse:
+   *      - CreateOrderRecord.compensate() → deletes order
+   *      - ReserveInventory.compensate() → releases inventory
    */
   @Post('orders')
   async placeOrder(
@@ -173,19 +202,30 @@ export class AppController {
       customerId: string;
       items: { productId: string; quantity: number }[];
       total: number;
+      simulatePaymentFailure?: boolean;
     },
   ) {
     const command = new PlaceOrderCommand(
       body.customerId,
       body.items,
       body.total,
+      body.simulatePaymentFailure ?? false,
     );
 
-    await this.mediatorBus.send(command);
-
-    return {
-      message: 'Order placed successfully',
-    };
+    try {
+      await this.mediatorBus.send(command);
+      return {
+        success: true,
+        message: 'Order placed successfully',
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: 'Order failed - compensations were executed',
+        error: (error as Error).message,
+        note: 'Check server logs to see the compensation flow',
+      };
+    }
   }
 
   /**

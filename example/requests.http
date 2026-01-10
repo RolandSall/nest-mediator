@@ -128,6 +128,48 @@ GET http://localhost:3000/users/test-user
 GET http://localhost:3000/users/skip-test
 
 ### ----------------------------------------
+### DOMAIN EVENTS & COMPENSATION (SAGA) TEST
+### ----------------------------------------
+
+### View all registered event handlers
+GET http://localhost:3000/events
+
+### Place order - SUCCESS (all critical consumers succeed)
+### Watch logs: ValidateInventory → ReserveInventory → CreateOrderRecord → ChargePayment → Non-critical handlers
+POST http://localhost:3000/orders
+Content-Type: application/json
+
+{
+  "customerId": "cust-123",
+  "items": [
+    {"productId": "prod-1", "quantity": 2},
+    {"productId": "prod-2", "quantity": 1}
+  ],
+  "total": 149.99
+}
+
+### Place order - FAILURE WITH COMPENSATION (payment fails, triggers saga rollback)
+### Watch logs to see:
+### 1. ValidateInventory (order 1) ✓
+### 2. ReserveInventory (order 2) ✓ - tracked for compensation
+### 3. CreateOrderRecord (order 3) ✓ - tracked for compensation
+### 4. ChargePayment (order 4) ✗ FAILS
+### 5. Compensations run in REVERSE order:
+###    - CreateOrderRecord.compensate() → deletes order record
+###    - ReserveInventory.compensate() → releases inventory
+POST http://localhost:3000/orders
+Content-Type: application/json
+
+{
+  "customerId": "cust-456",
+  "items": [
+    {"productId": "prod-1", "quantity": 3}
+  ],
+  "total": 99.99,
+  "simulatePaymentFailure": true
+}
+
+### ----------------------------------------
 ### HEALTH CHECK
 ### ----------------------------------------
 

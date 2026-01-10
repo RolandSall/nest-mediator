@@ -24,4 +24,9 @@ export interface EventPublishResult {
    * Note: Non-critical handlers run in background, so this only indicates they were started
    */
   nonCriticalDispatched: number;
+
+  /**
+   * Number of compensations that were executed (only non-zero when a critical handler fails)
+   */
+  compensationsRun: number;
 }

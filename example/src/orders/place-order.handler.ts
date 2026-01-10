@@ -29,6 +29,7 @@ export class PlaceOrderHandler implements ICommandHandler<PlaceOrderCommand> {
         command.customerId,
         command.items,
         command.total,
+        command.simulatePaymentFailure,
       ),
     );
 

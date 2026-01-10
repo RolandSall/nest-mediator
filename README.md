@@ -42,26 +42,18 @@ Version 0.7.0 introduces **Domain Events** with Critical and Non-Critical consum
 
 - `IEvent` interface for domain events
 - `IEventConsumer<TEvent>` interface for event consumers
+- `ICriticalEventConsumer<TEvent>` interface for critical consumers with optional compensation
 - `@EventHandler(EventClass)` decorator to register consumers
 - `@Critical({ order: n })` decorator for critical consumers (run sequentially)
 - `@NonCritical()` decorator for non-critical consumers (fire-and-forget)
 - `mediatorBus.publish(event)` method to publish events
 - `EventCriticality` enum (`CRITICAL`, `NON_CRITICAL`)
+- **Saga-style compensation**: Critical consumers can define a `compensate()` method that runs in reverse order when a subsequent consumer fails
 - Internal architecture refactoring (MediatorBus now delegates to CommandBus, QueryBus, EventBus)
 
 ### Backward Compatibility
 
 - **`IEventHandler` renamed to `IEventConsumer`**: `IEventHandler` is now a deprecated type alias. Update your imports:
-
-```typescript
-// Before
-import { IEventHandler } from '@rolandsall24/nest-mediator';
-class MyHandler implements IEventHandler<MyEvent> { ... }
-
-// After (recommended)
-import { IEventConsumer } from '@rolandsall24/nest-mediator';
-class MyConsumer implements IEventConsumer<MyEvent> { ... }
-```
 
 - **MediatorBus API unchanged**: The `send()`, `query()`, and `publish()` methods work exactly as before
 - **No breaking changes**: Existing command/query code continues to work without modifications
@@ -363,13 +355,30 @@ export class ValidateInventoryConsumer implements IEventConsumer<OrderPlacedEven
     // Throw error if validation fails - stops the event processing
   }
 }
+```
+
+**Critical consumer with compensation** (implements rollback on failure):
+
+```typescript
+import { Injectable, Logger } from '@nestjs/common';
+import { EventHandler, ICriticalEventConsumer, Critical } from '@rolandsall24/nest-mediator';
+import { OrderPlacedEvent } from './order-placed.event';
 
 @Injectable()
 @EventHandler(OrderPlacedEvent)
-@Critical({ order: 2 })  // Runs second
-export class ReserveInventoryConsumer implements IEventConsumer<OrderPlacedEvent> {
+@Critical({ order: 2 })
+export class ReserveInventoryConsumer implements ICriticalEventConsumer<OrderPlacedEvent> {
+  private readonly logger = new Logger(ReserveInventoryConsumer.name);
+
   async handle(event: OrderPlacedEvent): Promise<void> {
-    // Reserve inventory for the order
+    this.logger.log(`Reserving inventory for order ${event.orderId}`);
+    // Reserve inventory in the database
+  }
+
+  // Called if a SUBSEQUENT critical consumer fails (e.g., ChargePayment at order 4)
+  async compensate(event: OrderPlacedEvent): Promise<void> {
+    this.logger.warn(`[COMPENSATE] Releasing inventory for order ${event.orderId}`);
+    // Release the reserved inventory
   }
 }
 ```
@@ -455,21 +464,62 @@ export class PlaceOrderHandler implements ICommandHandler<PlaceOrderCommand> {
 publish(OrderPlacedEvent)
     │
     ├─► Critical Consumers (sequential, awaited)
-    │   ├─► ValidateInventoryConsumer (order: 1)
-    │   ├─► ReserveInventoryConsumer (order: 2)
-    │   └─► CreateOrderRecordConsumer (order: 3)
+    │   ├─► ValidateInventoryConsumer (order: 1) ✓
+    │   ├─► ReserveInventoryConsumer (order: 2) ✓  [has compensate()]
+    │   ├─► CreateOrderRecordConsumer (order: 3) ✓ [has compensate()]
+    │   └─► ChargePaymentConsumer (order: 4) ✗ FAILS
     │
-    │   If any critical consumer fails → throw error, stop processing
+    │   On failure → Run compensations in REVERSE order:
+    │   ├─► CreateOrderRecordConsumer.compensate() - deletes order
+    │   └─► ReserveInventoryConsumer.compensate() - releases inventory
+    │   Then throw original error
     │
     └─► Non-Critical Consumers (parallel, fire-and-forget)
         ├─► SendOrderConfirmationConsumer
         ├─► NotifyWarehouseConsumer
         └─► TrackAnalyticsConsumer
 
+        Only runs if ALL critical consumers succeed
         Failures logged but don't affect the result
 ```
 
-#### 5. Register Event Consumers
+#### 5. Compensation Pattern (Saga)
+
+Critical consumers can implement the `ICriticalEventConsumer` interface with an optional `compensate()` method to support saga-style rollback:
+
+```typescript
+import { ICriticalEventConsumer, EventHandler, Critical } from '@rolandsall24/nest-mediator';
+
+@Injectable()
+@EventHandler(OrderPlacedEvent)
+@Critical({ order: 3 })
+export class CreateOrderRecordConsumer implements ICriticalEventConsumer<OrderPlacedEvent> {
+  async handle(event: OrderPlacedEvent): Promise<void> {
+    // Create order in database
+    await this.orderRepository.create({
+      id: event.orderId,
+      customerId: event.customerId,
+      items: event.items,
+      total: event.total,
+    });
+  }
+
+  async compensate(event: OrderPlacedEvent): Promise<void> {
+    // Rollback: delete the order record
+    await this.orderRepository.delete(event.orderId);
+  }
+}
+```
+
+**Compensation rules:**
+- Only called when a **subsequent** critical consumer fails (not if this consumer fails)
+- Runs in **reverse order** (last succeeded → first succeeded)
+- Receives the same event instance passed to `handle()`
+- Should be **idempotent** - safe to run multiple times
+- Errors in compensations are logged but don't stop other compensations
+- Non-critical consumers don't need compensation (they're fire-and-forget)
+
+#### 6. Register Event Consumers
 
 Add consumers to your module providers - they're auto-discovered via `@EventHandler`:
 
@@ -897,11 +947,26 @@ export interface IEvent {}
 
 #### `IEventConsumer<TEvent>`
 
-Interface for event consumers.
+Interface for event consumers (non-critical or critical without compensation).
 
 ```typescript
 export interface IEventConsumer<TEvent extends IEvent> {
   handle(event: TEvent): Promise<void>;
+}
+```
+
+#### `ICriticalEventConsumer<TEvent>`
+
+Interface for critical event consumers with optional compensation support (saga pattern).
+
+```typescript
+export interface ICriticalEventConsumer<TEvent extends IEvent> extends IEventConsumer<TEvent> {
+  /**
+   * Compensate/rollback the work done by handle().
+   * Called when a subsequent critical consumer fails.
+   * Should be idempotent and derive state from the event.
+   */
+  compensate?(event: TEvent): Promise<void>;
 }
 ```
 
@@ -914,6 +979,7 @@ export interface EventPublishResult {
   totalHandlers: number;
   criticalSucceeded: number;
   nonCriticalDispatched: number;
+  compensationsRun: number;  // Number of compensations executed on failure
 }
 ```
 

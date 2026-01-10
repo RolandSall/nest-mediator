@@ -5,6 +5,7 @@ export * from './order-placed.event';
 export * from './handlers/validate-inventory.handler';
 export * from './handlers/reserve-inventory.handler';
 export * from './handlers/create-order-record.handler';
+export * from './handlers/charge-payment.handler';
 
 // Non-critical handlers
 export * from './handlers/send-order-confirmation.handler';

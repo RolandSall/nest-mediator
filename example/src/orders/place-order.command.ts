@@ -5,5 +5,7 @@ export class PlaceOrderCommand implements ICommand {
     public readonly customerId: string,
     public readonly items: { productId: string; quantity: number }[],
     public readonly total: number,
+    /** Set to true to simulate payment failure (for testing compensation) */
+    public readonly simulatePaymentFailure: boolean = false,
   ) {}
 }

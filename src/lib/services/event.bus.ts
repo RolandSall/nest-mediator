@@ -3,6 +3,7 @@ import { ModuleRef } from '@nestjs/core';
 import {
   IEvent,
   IEventConsumer,
+  ICriticalEventConsumer,
   IEventBus,
   EventPublishResult,
   EventCriticalityMetadata,
@@ -19,8 +20,17 @@ interface RegisteredEventConsumer {
 }
 
 /**
+ * Tracks a succeeded critical consumer for potential compensation
+ */
+interface CompensatableConsumer<TEvent extends IEvent> {
+  consumer: ICriticalEventConsumer<TEvent>;
+  name: string;
+}
+
+/**
  * Event bus implementation.
  * Publishes events to their consumers with critical/non-critical handling.
+ * Supports saga-style compensation for critical consumers.
  */
 @Injectable()
 export class EventBus implements IEventBus {
@@ -34,8 +44,11 @@ export class EventBus implements IEventBus {
    *
    * Execution flow:
    * 1. Critical consumers run sequentially in order (lower order first)
-   * 2. If all critical consumers succeed, non-critical consumers are fired in parallel (fire-and-forget)
-   * 3. If a critical consumer fails, remaining critical consumers are skipped and non-critical consumers don't run
+   * 2. If a critical consumer fails:
+   *    - Compensations run in reverse order for previously succeeded consumers
+   *    - Non-critical consumers are NOT dispatched
+   *    - Original error is thrown after compensations complete
+   * 3. If all critical consumers succeed, non-critical consumers are fired in parallel (fire-and-forget)
    *
    * @param event - The event instance
    * @returns Promise with the publish result
@@ -50,6 +63,7 @@ export class EventBus implements IEventBus {
         totalHandlers: 0,
         criticalSucceeded: 0,
         nonCriticalDispatched: 0,
+        compensationsRun: 0,
       };
     }
 
@@ -66,10 +80,12 @@ export class EventBus implements IEventBus {
       `Publishing event: ${eventName} to ${criticalConsumers.length} critical and ${nonCriticalConsumers.length} non-critical consumers`
     );
 
-    // Phase 1: Execute critical consumers sequentially
+    // Phase 1: Execute critical consumers sequentially, tracking those with compensate()
+    const succeededWithCompensation: CompensatableConsumer<TEvent>[] = [];
     let criticalSucceeded = 0;
+
     for (const registeredConsumer of criticalConsumers) {
-      const consumer = this.moduleRef.get<IEventConsumer<TEvent>>(
+      const consumer = this.moduleRef.get<ICriticalEventConsumer<TEvent>>(
         registeredConsumer.type,
         { strict: false }
       );
@@ -80,10 +96,29 @@ export class EventBus implements IEventBus {
         this.logger.log(
           `Critical consumer ${registeredConsumer.type.name} completed successfully`
         );
+
+        // Track if it has a compensate method for potential rollback
+        if (typeof consumer.compensate === 'function') {
+          succeededWithCompensation.push({
+            consumer,
+            name: registeredConsumer.type.name,
+          });
+        }
       } catch (error) {
         this.logger.error(
           `Critical consumer ${registeredConsumer.type.name} failed: ${(error as Error).message}`
         );
+
+        // Run compensations for previously succeeded consumers (in reverse order)
+        const compensationsRun = await this.runCompensations(
+          succeededWithCompensation,
+          event
+        );
+
+        this.logger.log(
+          `Ran ${compensationsRun} compensations after failure in ${registeredConsumer.type.name}`
+        );
+
         throw error;
       }
     }
@@ -99,7 +134,42 @@ export class EventBus implements IEventBus {
       totalHandlers: consumers.length,
       criticalSucceeded,
       nonCriticalDispatched,
+      compensationsRun: 0,
     };
+  }
+
+  /**
+   * Run compensations for succeeded consumers in reverse order
+   * Continues even if individual compensations fail (logs errors)
+   *
+   * @param succeededConsumers - Consumers that succeeded and have compensate()
+   * @param event - The event to pass to compensate()
+   * @returns Number of compensations that were run
+   */
+  private async runCompensations<TEvent extends IEvent>(
+    succeededConsumers: CompensatableConsumer<TEvent>[],
+    event: TEvent
+  ): Promise<number> {
+    let compensationsRun = 0;
+
+    // Run in reverse order (last succeeded -> first succeeded)
+    for (const { consumer, name } of succeededConsumers.reverse()) {
+      try {
+        this.logger.log(`Running compensation for ${name}...`);
+        await consumer.compensate!(event);
+        compensationsRun++;
+        this.logger.log(`Compensation for ${name} completed successfully`);
+      } catch (compError) {
+        // Log but continue with other compensations
+        this.logger.error(
+          `Compensation for ${name} failed: ${(compError as Error).message}. ` +
+            `Manual intervention may be required.`
+        );
+        compensationsRun++; // Count as run even if failed
+      }
+    }
+
+    return compensationsRun;
   }
 
   /**

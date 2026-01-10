@@ -1,15 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { EventHandler, IEventHandler, Critical } from '@rolandsall24/nest-mediator';
+import { EventHandler, IEventConsumer, Critical } from '@rolandsall24/nest-mediator';
 import { OrderPlacedEvent } from '../order-placed.event';
 
 /**
  * Critical handler: Validates that inventory is available for the order
  * Runs first (order: 1) and must succeed before other handlers run
+ *
+ * Note: Validation is read-only, so no compensation is needed.
+ * We use IEventConsumer (not ICriticalEventConsumer) since there's nothing to rollback.
  */
 @Injectable()
 @EventHandler(OrderPlacedEvent)
 @Critical({ order: 1 })
-export class ValidateInventoryHandler implements IEventHandler<OrderPlacedEvent> {
+export class ValidateInventoryHandler implements IEventConsumer<OrderPlacedEvent> {
   private readonly logger = new Logger(ValidateInventoryHandler.name);
 
   async handle(event: OrderPlacedEvent): Promise<void> {

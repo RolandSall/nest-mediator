@@ -18,6 +18,7 @@ import {
   ValidateInventoryHandler,
   ReserveInventoryHandler,
   CreateOrderRecordHandler,
+  ChargePaymentHandler,
   SendOrderConfirmationHandler,
   NotifyWarehouseHandler,
   TrackOrderAnalyticsHandler,
@@ -81,9 +82,10 @@ import {
 
     // Event handlers - auto-discovered via @EventHandler decorator
     // Critical handlers (run sequentially in order):
-    //   order 1: ValidateInventoryHandler
-    //   order 2: ReserveInventoryHandler
-    //   order 3: CreateOrderRecordHandler
+    //   order 1: ValidateInventoryHandler - validates inventory (no compensation needed)
+    //   order 2: ReserveInventoryHandler - reserves inventory, compensate() releases it
+    //   order 3: CreateOrderRecordHandler - creates order record, compensate() deletes it
+    //   order 4: ChargePaymentHandler - charges payment, compensate() refunds it
     // Non-critical handlers (run in parallel, fire-and-forget):
     //   SendOrderConfirmationHandler
     //   NotifyWarehouseHandler
@@ -91,6 +93,7 @@ import {
     ValidateInventoryHandler,
     ReserveInventoryHandler,
     CreateOrderRecordHandler,
+    ChargePaymentHandler,
     SendOrderConfirmationHandler,
     NotifyWarehouseHandler,
     TrackOrderAnalyticsHandler,
