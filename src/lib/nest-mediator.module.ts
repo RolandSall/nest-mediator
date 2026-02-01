@@ -1,4 +1,4 @@
-import { DynamicModule, Module, Type, OnModuleInit } from '@nestjs/common';
+import { DynamicModule, Module, Type, OnModuleInit, Provider, Logger } from '@nestjs/common';
 import { Reflector, DiscoveryService, DiscoveryModule } from '@nestjs/core';
 import { MediatorBus } from './services/index.js';
 import { CommandBus } from './services/command.bus.js';
@@ -13,6 +13,7 @@ import {
   EVENT_CRITICALITY_METADATA,
   EventCriticalityMetadata,
 } from './decorators/index.js';
+import { configureEventStore } from './event-store/strategies/index.js';
 import {
   ICommand,
   ICommandHandler,
@@ -22,6 +23,8 @@ import {
   PipelineBehaviorOptions,
   IEvent,
   IEventConsumer,
+  EventStoreConfig,
+  EVENT_STORE_REPOSITORY,
 } from './interfaces/index.js';
 import {
   LoggingBehavior,
@@ -69,6 +72,17 @@ export interface NestMediatorModuleOptions {
    * Default: 500
    */
   performanceThresholdMs?: number;
+
+  /**
+   * Event store configuration for event persistence.
+   * If not provided, events are not persisted to a database.
+   *
+   * Supports three connection options:
+   * - Option 1: Provide `url` - library manages connection
+   * - Option 2: Provide `useExistingPool` - reuse existing connection pool
+   * - Option 3: Provide `repository` - use custom repository implementation
+   */
+  eventStore?: EventStoreConfig;
 }
 
 /**
@@ -224,10 +238,21 @@ export class NestMediatorModule implements OnModuleInit {
    *   enablePerformanceTracking: true,
    *   performanceThresholdMs: 1000,
    * })
+   *
+   * // With event store (audit mode)
+   * NestMediatorModule.forRoot({
+   *   eventStore: {
+   *     type: 'postgres',
+   *     url: process.env.DATABASE_URL,
+   *     mode: 'audit',
+   *   },
+   * })
    * ```
    */
   static forRoot(options: NestMediatorModuleOptions = {}): DynamicModule {
+    const logger = new Logger('NestMediatorModule');
     const builtInProviders: Type[] = [];
+    const eventStoreProviders: Provider[] = [];
 
     // Add built-in behaviors based on options
     if (options.enableExceptionHandling) {
@@ -246,6 +271,46 @@ export class NestMediatorModule implements OnModuleInit {
       builtInProviders.push(ValidationBehavior);
     }
 
+    // Configure event store if provided
+    if (options.eventStore) {
+      const config = options.eventStore;
+
+      // Validate configuration
+      if (!config.type) {
+        throw new Error('EventStore config.type is required');
+      }
+
+      // Count how many connection/repository options are set
+      const optionsSet = [
+        config.url,
+        config.useExistingPool,
+        config.useExistingRepository,
+      ].filter(Boolean).length;
+
+      // Option 3 (useExistingRepository) can optionally have url for schema creation
+      if (config.useExistingRepository) {
+        if (config.useExistingPool) {
+          throw new Error(
+            'EventStore config cannot specify both useExistingRepository and useExistingPool'
+          );
+        }
+        // url is optional for useExistingRepository (used for schema creation only)
+      } else {
+        // Options 1 and 2 require exactly one of url or useExistingPool
+        if (!config.url && !config.useExistingPool) {
+          throw new Error(
+            'EventStore config must specify url, useExistingPool, or useExistingRepository'
+          );
+        }
+        if (config.url && config.useExistingPool) {
+          throw new Error('EventStore config cannot specify both url and useExistingPool');
+        }
+      }
+
+      // Delegate to strategies
+      configureEventStore(eventStoreProviders, config);
+    }
+
     return {
       module: NestMediatorModule,
       imports: [DiscoveryModule],
@@ -257,13 +322,16 @@ export class NestMediatorModule implements OnModuleInit {
         MediatorBus,
         Reflector,
         ...builtInProviders,
+        ...eventStoreProviders,
         {
           provide: NEST_MEDIATOR_OPTIONS,
           useValue: options,
         },
       ],
-      exports: [MediatorBus],
-      global: true,
+      exports: options.eventStore
+        ? [MediatorBus, EVENT_STORE_REPOSITORY]
+        : [MediatorBus],
+      // Note: Removed global: true - consumers must import NestMediatorModule
     };
   }
 }
