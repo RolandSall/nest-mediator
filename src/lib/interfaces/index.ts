@@ -10,3 +10,4 @@ export * from './command-bus.interface.js';
 export * from './query-bus.interface.js';
 export * from './event-bus.interface.js';
 export * from './mediator.interface.js';
+export * from './event-store.interface.js';
