@@ -7,3 +7,7 @@ export * from './send-confirmation-email.handler';
 export * from './release-inventory.handler';
 export * from './refund-payment.handler';
 export * from './send-cancellation-email.handler';
+
+// Compensating event handlers (run when compensation is triggered)
+export * from './handle-inventory-released.handler';
+export * from './handle-payment-refunded.handler';

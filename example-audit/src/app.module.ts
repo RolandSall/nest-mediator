@@ -17,6 +17,8 @@ import {
   ReleaseInventoryHandler,
   RefundPaymentHandler,
   SendCancellationEmailHandler,
+  HandleInventoryReleasedHandler,
+  HandlePaymentRefundedHandler,
 } from './application/event-handlers';
 import {
   AuditLoggingService,
@@ -95,6 +97,10 @@ const databaseUrl = process.env.DATABASE_URL;
     ReleaseInventoryHandler,
     RefundPaymentHandler,
     SendCancellationEmailHandler,
+
+    // Compensating event handlers
+    HandleInventoryReleasedHandler,
+    HandlePaymentRefundedHandler,
   ],
 })
 export class AppModule {}

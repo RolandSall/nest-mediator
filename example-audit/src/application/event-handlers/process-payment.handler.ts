@@ -1,11 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { EventHandler, IEventConsumer, MediatorBus, Critical } from '@rolandsall24/nest-mediator';
-import { OrderPlacedEvent, PaymentChargedEvent } from '../../domain/events';
+import { EventHandler, ICriticalEventConsumer, IEvent, MediatorBus, Critical } from '@rolandsall24/nest-mediator';
+import { OrderPlacedEvent, PaymentChargedEvent, PaymentRefundedEvent } from '../../domain/events';
 
 @Injectable()
 @EventHandler(OrderPlacedEvent)
 @Critical({ order: 2 })
-export class ProcessPaymentHandler implements IEventConsumer<OrderPlacedEvent> {
+export class ProcessPaymentHandler implements ICriticalEventConsumer<OrderPlacedEvent> {
   private readonly logger = new Logger(ProcessPaymentHandler.name);
 
   constructor(private readonly mediatorBus: MediatorBus) {}
@@ -16,5 +16,10 @@ export class ProcessPaymentHandler implements IEventConsumer<OrderPlacedEvent> {
     await this.mediatorBus.publish(
       new PaymentChargedEvent(event.orderId, event.total),
     );
+  }
+
+  async applyCompensatingEvent(event: OrderPlacedEvent): Promise<IEvent> {
+    this.logger.warn(`[Payment] Compensating: refunding payment for order ${event.orderId}`);
+    return new PaymentRefundedEvent(event.orderId);
   }
 }

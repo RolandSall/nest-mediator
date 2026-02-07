@@ -1,11 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { EventHandler, IEventConsumer, MediatorBus, Critical } from '@rolandsall24/nest-mediator';
-import { OrderPlacedEvent, InventoryReservedEvent } from '../../domain/events';
+import { EventHandler, ICriticalEventConsumer, IEvent, MediatorBus, Critical } from '@rolandsall24/nest-mediator';
+import { OrderPlacedEvent, InventoryReservedEvent, InventoryReleasedEvent } from '../../domain/events';
 
 @Injectable()
 @EventHandler(OrderPlacedEvent)
 @Critical({ order: 1 })
-export class ReserveInventoryHandler implements IEventConsumer<OrderPlacedEvent> {
+export class ReserveInventoryHandler implements ICriticalEventConsumer<OrderPlacedEvent> {
   private readonly logger = new Logger(ReserveInventoryHandler.name);
 
   constructor(private readonly mediatorBus: MediatorBus) {}
@@ -18,5 +18,10 @@ export class ReserveInventoryHandler implements IEventConsumer<OrderPlacedEvent>
     await this.mediatorBus.publish(
       new InventoryReservedEvent(event.orderId, event.items),
     );
+  }
+
+  async applyCompensatingEvent(event: OrderPlacedEvent): Promise<IEvent> {
+    this.logger.warn(`[Inventory] Compensating: releasing inventory for order ${event.orderId}`);
+    return new InventoryReleasedEvent(event.orderId);
   }
 }
