@@ -13,9 +13,16 @@ export interface MediatorContextData {
 
   /**
    * Unique identifier of the direct cause of the current operation.
-   * Points to the command/event that triggered this operation.
+   * Points to the parent event that triggered this operation.
    */
   causationId?: string;
+
+  /**
+   * The event ID currently being processed.
+   * Used by the persistence consumer as the stored event_id,
+   * and by child events as their causation_id (parent→child link).
+   */
+  currentEventId?: string;
 }
 
 /**
@@ -48,11 +55,12 @@ class MediatorContextManager {
    * @param callback - The async operation to execute
    * @returns The result of the callback
    */
-  runWithCausation<T>(causationId: string, callback: () => Promise<T>): Promise<T> {
+  runWithCausation<T>(eventId: string, callback: () => Promise<T>): Promise<T> {
     const current = this.storage.getStore();
     const childContext: MediatorContextData = {
       correlationId: current?.correlationId ?? uuidv4(),
-      causationId,
+      causationId: current?.currentEventId,
+      currentEventId: eventId,
     };
     return this.storage.run(childContext, callback);
   }

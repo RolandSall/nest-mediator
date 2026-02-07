@@ -32,8 +32,8 @@ export class EventStorePersistenceConsumer implements IEventConsumer<IEvent> {
    * @param event - The event to persist
    */
   async handle(event: IEvent): Promise<void> {
-    const eventId = uuidv4();
     const context = mediatorContext.getContext();
+    const eventId = context.currentEventId ?? uuidv4();
     const aggregateInfo = this.extractor.extract(event);
 
     const storedEvent: StoredEvent = {

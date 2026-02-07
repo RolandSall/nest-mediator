@@ -331,7 +331,7 @@ export class NestMediatorModule implements OnModuleInit {
       exports: options.eventStore
         ? [MediatorBus, EVENT_STORE_REPOSITORY]
         : [MediatorBus],
-      // Note: Removed global: true - consumers must import NestMediatorModule
+      global: true,
     };
   }
 }
