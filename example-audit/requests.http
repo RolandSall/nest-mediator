@@ -1,0 +1,44 @@
+### AUDIT MODE EXAMPLE
+### npm run start:dev (without DB) or:
+### DATABASE_URL=postgres://postgres:postgres@localhost:5433/audit_example npm run start:dev
+
+### Get info
+GET http://localhost:3000
+
+### Get status
+GET http://localhost:3000/status
+
+###
+### ORDER FLOW
+###
+
+### Place an order
+POST http://localhost:3000/orders
+Content-Type: application/json
+
+{
+  "customerId": "cust-123",
+  "items": [{"productId": "laptop", "quantity": 1}],
+  "total": 999.99
+}
+
+### Get all orders (from OrderService - source of truth)
+GET http://localhost:3000/orders
+
+### Get order by ID
+GET http://localhost:3000/orders/order-XXXXX
+
+### Cancel order
+POST http://localhost:3000/orders/order-XXXXX/cancel
+Content-Type: application/json
+
+{
+  "reason": "Customer requested cancellation"
+}
+
+###
+### AUDIT LOG (requires DATABASE_URL)
+###
+
+### View audit log
+GET http://localhost:3000/audit

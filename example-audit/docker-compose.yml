@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: nest-mediator-audit-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: audit_example
+    ports:
+      - "5433:5432"
+    volumes:
+      - audit_pgdata:/var/lib/postgresql/data
+
+volumes:
+  audit_pgdata:
