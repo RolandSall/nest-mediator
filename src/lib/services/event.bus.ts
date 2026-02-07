@@ -214,6 +214,17 @@ export class EventBus implements IEventBus {
    * Prefers applyCompensatingEvent() (returns event) over compensate() (deprecated, returns void).
    * Continues even if individual compensations fail (logs errors).
    *
+   * TODO: Infinite loop detection — currently the developer is responsible for avoiding
+   * circular dispatch chains (e.g., compensation publishes event whose critical consumer
+   * fails and triggers compensation again). Potential approaches discussed:
+   * - Depth limiting: simple but arbitrary threshold, can't distinguish legitimate deep
+   *   chains from loops, and runWithNewContext() resets context so command→event→command
+   *   cycles bypass it.
+   * - Call stack tracking: track event/command types on the processing stack and flag
+   *   duplicates. More precise but risks false positives when the same event type is
+   *   legitimately dispatched for different aggregate instances.
+   * - Hybrid: stack tracking as a warning + configurable depth limit as a hard stop.
+   *
    * @param succeededConsumers - Consumers that have compensation methods
    * @param event - The event to pass to compensation
    * @returns Number of compensations that were run

@@ -51,7 +51,7 @@ class MediatorContextManager {
    * Run a callback with the same correlation but a new causation.
    * Used when an event handler publishes additional events.
    *
-   * @param causationId - The ID of the event/command that caused this operation
+   * @param eventId - The ID of the event being published
    * @param callback - The async operation to execute
    * @returns The result of the callback
    */
