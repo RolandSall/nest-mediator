@@ -1,19 +1,19 @@
 # NestJS Mediator
 
-A lightweight CQRS (Command Query Responsibility Segregation) mediator pattern implementation for NestJS applications.
+A lightweight CQRS mediator for NestJS — start simple, add event persistence when you need it, scale to full event sourcing when you're ready.
 
 ## Features
 
-- Clean separation between Commands, Queries, and Events
-- Type-safe handlers with TypeScript
-- Decorator-based handler registration
-- Automatic handler discovery and registration
-- Pipeline Behaviors for cross-cutting concerns (logging, validation, etc.)
-- Type-Specific Behaviors - behaviors that only apply to specific request types (v0.6.0+)
-- **Domain Events with Critical/Non-Critical consumers (v0.7.0+)**
-- Built-in behaviors: Logging, Validation, Exception Handling, Performance Tracking
-- Built on top of NestJS dependency injection
-- Zero runtime dependencies beyond NestJS
+- **CQRS** — Commands, Queries, and Domain Events with type-safe handlers
+- **Three architecture modes** — Simple (no DB), Audit (event log), Source (event sourcing)
+- **Zero-boilerplate event sourcing** — `@ForAggregate` + `@DomainEvent` eliminate all wiring
+- **Critical & Non-Critical consumers** — Sequential saga-style or fire-and-forget
+- **Saga compensation** — Automatic rollback via `applyCompensatingEvent()`
+- **Pipeline Behaviors** — Cross-cutting concerns (logging, validation, caching, retry)
+- **Flexible Event Store** — PostgreSQL-backed, bring your own pool or repository
+- **Optimistic Concurrency** — Sequence-based version control with `ConcurrencyError`
+- **Correlation & Causation IDs** — Automatic distributed tracing via `AsyncLocalStorage`
+- **Zero config** — Decorator-based auto-discovery, built on NestJS DI
 
 ## Installation
 
@@ -21,9 +21,7 @@ A lightweight CQRS (Command Query Responsibility Segregation) mediator pattern i
 npm install @rolandsall24/nest-mediator
 ```
 
-### TypeScript Configuration
-
-This library requires TypeScript decorators to be enabled. Add the following to your `tsconfig.json`:
+**TypeScript configuration** — enable decorators in `tsconfig.json`:
 
 ```json
 {
@@ -34,296 +32,303 @@ This library requires TypeScript decorators to be enabled. Add the following to 
 }
 ```
 
-## Upgrading to v0.7.0
+## Choose Your Architecture
 
-Version 0.7.0 introduces **Domain Events** with Critical and Non-Critical consumer support.
+NestJS Mediator grows with your application. Start simple, add what you need.
 
-### What's New
+| | **Simple** | **Audit** | **Source** |
+|---|---|---|---|
+| **Database required** | No | PostgreSQL | PostgreSQL |
+| **State storage** | Your choice (in-memory, any DB) | Your tables (e.g., `orders`) | Event store only |
+| **Event persistence** | None | Events logged alongside state | Events ARE the state |
+| **Aggregates** | Not needed | Not needed | `AggregateRoot` + `AggregateRepository` |
+| **Concurrency control** | Your responsibility | Your responsibility | Built-in (optimistic) |
+| **Use when** | Prototyping, simple apps | Production apps needing audit trail | Domain-driven, event-sourced systems |
 
-- `IEvent` interface for domain events
-- `IEventConsumer<TEvent>` interface for event consumers
-- `ICriticalEventConsumer<TEvent>` interface for critical consumers with optional compensation
-- `@EventHandler(EventClass)` decorator to register consumers
-- `@Critical({ order: n })` decorator for critical consumers (run sequentially)
-- `@NonCritical()` decorator for non-critical consumers (fire-and-forget)
-- `mediatorBus.publish(event)` method to publish events
-- `EventCriticality` enum (`CRITICAL`, `NON_CRITICAL`)
-- **Saga-style compensation**: Critical consumers can define a `compensate()` method that runs in reverse order when a subsequent consumer fails
-- Internal architecture refactoring (MediatorBus now delegates to CommandBus, QueryBus, EventBus)
-
-### Backward Compatibility
-
-- **`IEventHandler` renamed to `IEventConsumer`**: `IEventHandler` is now a deprecated type alias. Update your imports:
-
-- **MediatorBus API unchanged**: The `send()`, `query()`, and `publish()` methods work exactly as before
-- **No breaking changes**: Existing command/query code continues to work without modifications
-
----
-
-## Upgrading to v0.6.0
-
-Version 0.6.0 introduces **Type-Specific Pipeline Behaviors** - behaviors that only apply to specific request types.
-
-### What's New
-
-- New `@Handle()` decorator for the `handle` method to enable automatic request type inference
-- Behaviors can target specific command/query types without manual `instanceof` checks
-- Full backward compatibility - existing behaviors work unchanged
-
-### Type-Specific Behavior Example
-
-```typescript
-import { Injectable } from '@nestjs/common';
-import { IPipelineBehavior, PipelineBehavior, Handle } from '@rolandsall24/nest-mediator';
-import { CreateUserCommand } from './create-user.command';
-
-@Injectable()
-@PipelineBehavior({ priority: 100, scope: 'command' })
-export class CreateUserValidationBehavior
-  implements IPipelineBehavior<CreateUserCommand, void>
-{
-  @Handle()  // <-- Enables type inference from method signature
-  async handle(
-    request: CreateUserCommand,
-    next: () => Promise<void>,
-  ): Promise<void> {
-    // This behavior ONLY runs for CreateUserCommand
-    // No instanceof check needed!
-    if (!request.email.includes('@')) {
-      throw new Error('Invalid email');
-    }
-    return next();
-  }
-}
+```
+Simple ──────────► Audit ──────────► Source
+No DB               + event log       + event sourcing
+Just CQRS           + traceability    + aggregates
+                    + audit trail     + concurrency control
 ```
 
-### How It Works
-
-1. Apply `@PipelineBehavior()` to the class and `@Handle()` to the `handle` method
-2. TypeScript's `emitDecoratorMetadata` emits type information for the method parameters
-3. The library reads this metadata at registration time and filters behaviors by request type
-
-### No Migration Required
-
-Existing behaviors without `@Handle()` on the method continue to work exactly as before - they apply to all requests matching their scope.
-
 ---
 
-## Quick Start
+## Mode 1: Simple (No Database Required)
 
-### 1. Import the Module
+Pure CQRS with commands, queries, and domain events. No event store, no database — just clean separation of concerns.
 
-Import `NestMediatorModule` in your application module:
+### Module Setup
 
 ```typescript
 import { Module } from '@nestjs/common';
 import { NestMediatorModule } from '@rolandsall24/nest-mediator';
-import { CreateUserCommandHandler } from './handlers/create-user.handler';
-import { GetUserQueryHandler } from './handlers/get-user-query.handler';
 
-@Module({
-  imports: [
-    // Basic setup
-    NestMediatorModule.forRoot(),
-  ],
-  providers: [
-    // Add your handlers to the providers array
-    // They will be automatically discovered by the mediator
-    CreateUserCommandHandler,
-    GetUserQueryHandler,
-  ],
-})
-export class AppModule {}
-```
-
-Or with built-in pipeline behaviors enabled:
-
-```typescript
 @Module({
   imports: [
     NestMediatorModule.forRoot({
-      enableLogging: true,           // Log request handling with timing
-      enableValidation: true,        // Validate requests with class-validator
-      enableExceptionHandling: true, // Centralized exception logging
+      enableLogging: true,
+      enableValidation: true,
     }),
   ],
   providers: [
-    CreateUserCommandHandler,
-    GetUserQueryHandler,
+    CreateUserHandler,
+    GetUserHandler,
+    SendWelcomeEmailConsumer,
   ],
 })
 export class AppModule {}
 ```
 
-**How it works**: The module uses NestJS's `DiscoveryService` to automatically discover and register all providers decorated with `@CommandHandler`, `@QueryHandler`, or `@PipelineBehavior`. Simply add your handlers to the module's `providers` array and they will be automatically registered with the mediator!
-
-## Usage
-
-### Commands
-
-Commands are used for operations that change state (create, update, delete).
-
-#### 1. Define a Command
+### Define Commands & Handlers
 
 ```typescript
-import { ICommand } from '@rolandsall24/nest-mediator';
+import { ICommand, ICommandHandler, CommandHandler, MediatorBus } from '@rolandsall24/nest-mediator';
 
+// Command — a simple data container
 export class CreateUserCommand implements ICommand {
   constructor(
     public readonly email: string,
     public readonly name: string,
-    public readonly age: number
   ) {}
 }
-```
 
-#### 2. Create a Command Handler
-
-```typescript
-import { Injectable } from '@nestjs/common';
-import { CommandHandler, ICommandHandler } from '@rolandsall24/nest-mediator';
-import { CreateUserCommand } from '../commands/create-user.command';
-
+// Handler — contains the business logic
 @Injectable()
 @CommandHandler(CreateUserCommand)
-export class CreateUserCommandHandler implements ICommandHandler<CreateUserCommand> {
-  constructor(
-    // Inject your services here
-    // private readonly userRepository: UserRepository,
-  ) {}
+export class CreateUserHandler implements ICommandHandler<CreateUserCommand> {
+  constructor(private readonly mediatorBus: MediatorBus) {}
 
   async execute(command: CreateUserCommand): Promise<void> {
-    // Business logic here
-    console.log(`Creating user: ${command.email}`);
+    const userId = randomUUID();
+    // Save user to your database...
 
-    // Example: Save to database
-    // await this.userRepository.save({
-    //   email: command.email,
-    //   name: command.name,
-    //   age: command.age,
-    // });
+    // Publish domain event to trigger side effects
+    await this.mediatorBus.publish(
+      new UserCreatedEvent(userId, command.email, command.name),
+    );
   }
 }
 ```
 
-#### 3. Send a Command from Controller
+### Define Queries & Handlers
 
 ```typescript
-import { Controller, Post, Body } from '@nestjs/common';
-import { MediatorBus } from '@rolandsall24/nest-mediator';
-import { CreateUserCommand } from './commands/create-user.command';
+import { IQuery, IQueryHandler, QueryHandler } from '@rolandsall24/nest-mediator';
 
+export class GetUserQuery implements IQuery {
+  constructor(public readonly userId: string) {}
+}
+
+@Injectable()
+@QueryHandler(GetUserQuery)
+export class GetUserHandler implements IQueryHandler<GetUserQuery, UserDto> {
+  async execute(query: GetUserQuery): Promise<UserDto> {
+    // Fetch and return user...
+  }
+}
+```
+
+### Define Events & Consumers
+
+```typescript
+import { IEvent, IEventConsumer, EventHandler, NonCritical } from '@rolandsall24/nest-mediator';
+
+export class UserCreatedEvent implements IEvent {
+  constructor(
+    public readonly userId: string,
+    public readonly email: string,
+    public readonly name: string,
+  ) {}
+}
+
+@Injectable()
+@EventHandler(UserCreatedEvent)
+@NonCritical()
+export class SendWelcomeEmailConsumer implements IEventConsumer<UserCreatedEvent> {
+  async handle(event: UserCreatedEvent): Promise<void> {
+    // Send welcome email — fire-and-forget
+  }
+}
+```
+
+### Use from Controllers
+
+```typescript
 @Controller('users')
 export class UserController {
   constructor(private readonly mediator: MediatorBus) {}
 
   @Post()
-  async create(@Body() body: { email: string; name: string; age: number }): Promise<void> {
-    const command = new CreateUserCommand(
-      body.email,
-      body.name,
-      body.age
-    );
-
-    await this.mediator.send(command);
+  async create(@Body() body: CreateUserDto) {
+    await this.mediator.send(new CreateUserCommand(body.email, body.name));
   }
-}
-```
-
-### Queries
-
-Queries are used for operations that read data without changing state.
-
-#### 1. Define a Query
-
-```typescript
-import { IQuery } from '@rolandsall24/nest-mediator';
-
-export class GetUserByIdQuery implements IQuery {
-  constructor(public readonly userId: string) {}
-}
-```
-
-#### 2. Define a Query Result Type
-
-```typescript
-export interface UserDto {
-  id: string;
-  email: string;
-  name: string;
-  age: number;
-  createdAt: Date;
-}
-```
-
-#### 3. Create a Query Handler
-
-```typescript
-import { Injectable } from '@nestjs/common';
-import { QueryHandler, IQueryHandler } from '@rolandsall24/nest-mediator';
-import { GetUserByIdQuery } from '../queries/get-user-by-id.query';
-import { UserDto } from '../dtos/user.dto';
-
-@Injectable()
-@QueryHandler(GetUserByIdQuery)
-export class GetUserByIdQueryHandler implements IQueryHandler<GetUserByIdQuery, UserDto> {
-  constructor(
-    // Inject your services here
-    // private readonly userRepository: UserRepository,
-  ) {}
-
-  async execute(query: GetUserByIdQuery): Promise<UserDto> {
-    // Business logic here
-    console.log(`Fetching user with ID: ${query.userId}`);
-
-    // Example: Fetch from database
-    // const user = await this.userRepository.findById(query.userId);
-
-    // Return mock data for demonstration
-    return {
-      id: query.userId,
-      email: 'john.doe@example.com',
-      name: 'John Doe',
-      age: 30,
-      createdAt: new Date(),
-    };
-  }
-}
-```
-
-#### 4. Execute a Query from Controller
-
-```typescript
-import { Controller, Get, Param } from '@nestjs/common';
-import { MediatorBus } from '@rolandsall24/nest-mediator';
-import { GetUserByIdQuery } from './queries/get-user-by-id.query';
-import { UserDto } from './dtos/user.dto';
-
-@Controller('users')
-export class UserController {
-  constructor(private readonly mediator: MediatorBus) {}
 
   @Get(':id')
-  async getById(@Param('id') id: string): Promise<UserDto> {
-    const query = new GetUserByIdQuery(id);
-    const user = await this.mediator.query<GetUserByIdQuery, UserDto>(query);
-    return user;
+  async getById(@Param('id') id: string) {
+    return this.mediator.query(new GetUserQuery(id));
   }
 }
 ```
 
-### Domain Events
+---
 
-Domain events notify other parts of the system when something important happens. They support two consumer types:
+## Mode 2: Audit (Event Logging)
 
-- **Critical consumers**: Run sequentially in order. Must succeed for the operation to complete.
-- **Non-critical consumers**: Run in parallel after critical consumers complete. Fire-and-forget.
+Everything from Simple mode, plus **every domain event is automatically persisted** to a PostgreSQL table. Your application still manages state in its own tables — the event log provides traceability, debugging, and compliance.
 
-#### 1. Define an Event
+### What changes from Simple mode
+
+1. Add `eventStore` config with `mode: 'audit'`
+2. That's it — events are persisted automatically
 
 ```typescript
-import { IEvent } from '@rolandsall24/nest-mediator';
+@Module({
+  imports: [
+    NestMediatorModule.forRoot({
+      enableLogging: true,
+      eventStore: {
+        type: 'postgres',
+        url: process.env.DATABASE_URL,
+        mode: 'audit',
+        tableName: 'audit_events', // optional, defaults to 'domain_events'
+      },
+    }),
+  ],
+  providers: [
+    // Your application manages state in its own tables
+    { provide: ORDER_PERSISTOR, useClass: PostgresOrderAdapter },
 
+    CreateOrderHandler,
+    GetOrderHandler,
+    ReserveInventoryHandler,
+    ProcessPaymentHandler,
+  ],
+})
+export class AppModule {}
+```
+
+### How it works
+
+Your command handler saves state to your own table, then publishes a domain event. The library automatically persists the event to the audit table before dispatching to consumers.
+
+```typescript
+@Injectable()
+@CommandHandler(CreateOrderCommand)
+export class CreateOrderHandler implements ICommandHandler<CreateOrderCommand> {
+  constructor(
+    @Inject(ORDER_PERSISTOR) private readonly orderPersistor: IOrderPersistor,
+    private readonly mediatorBus: MediatorBus,
+  ) {}
+
+  async execute(command: CreateOrderCommand): Promise<void> {
+    const orderId = `order-${Date.now()}`;
+
+    // 1. Save to YOUR orders table (source of truth)
+    await this.orderPersistor.save({
+      orderId,
+      customerId: command.customerId,
+      items: command.items,
+      total: command.total,
+      status: 'placed',
+    });
+
+    // 2. Publish event — automatically logged to audit_events table
+    await this.mediatorBus.publish(
+      new OrderPlacedEvent(orderId, command.customerId, command.items, command.total),
+    );
+  }
+}
+```
+
+### Optional: `@DomainEvent` for richer audit logs
+
+In audit mode, `@DomainEvent` is **purely informational** — it does not change runtime behavior. Adding it populates the `aggregate_type` and `aggregate_id` columns in the event store, which makes querying and filtering your audit log significantly easier.
+
+```typescript
+// Without @DomainEvent — events are still persisted, but aggregate_type and aggregate_id are null
+export class OrderPlacedEvent implements IEvent {
+  constructor(public readonly orderId: string, public readonly total: number) {}
+}
+
+// With @DomainEvent — aggregate_type='Order', aggregate_id=orderId in the audit table
+@DomainEvent('Order', 'orderId')
+export class OrderPlacedEvent implements IEvent {
+  constructor(public readonly orderId: string, public readonly total: number) {}
+}
+```
+
+This is optional. Events are logged either way. The decorator just gives you better data for queries like *"show me all events for order X"* or *"show me all Order events"*.
+
+### What you get
+
+Every event is stored with full context:
+
+| Column | Description |
+|--------|-------------|
+| `event_id` | Unique event identifier |
+| `event_type` | Class name (e.g., `OrderPlacedEvent`) |
+| `aggregate_type` | Aggregate name from `@DomainEvent` (if present) |
+| `aggregate_id` | Aggregate ID from `@DomainEvent` (if present) |
+| `correlation_id` | Groups all events from the same business transaction |
+| `causation_id` | Points to the parent event that caused this one |
+| `payload` | Full event data as JSON |
+| `occurred_at` | Timestamp |
+
+### When to use Audit mode
+
+- You need an **audit trail** for compliance or debugging
+- You want to **trace event chains** (correlation/causation IDs)
+- You're happy managing state in your own tables
+- You want to **answer "what happened?"** without changing your architecture
+
+---
+
+## Mode 3: Source (Event Sourcing)
+
+Events **are** the data. There are no state tables. Application state is rebuilt by replaying events from the event store.
+
+### What changes from Audit mode
+
+1. Change `mode: 'audit'` to `mode: 'source'`
+2. Define an `AggregateRoot` with business rules
+3. Add an `AggregateRepository` with `@ForAggregate` (one line)
+4. Gain **optimistic concurrency control** for free
+
+```typescript
+@Module({
+  imports: [
+    NestMediatorModule.forRoot({
+      enableLogging: true,
+      eventStore: {
+        type: 'postgres',
+        url: process.env.DATABASE_URL,
+        mode: 'source',
+        tableName: 'domain_events',
+      },
+    }),
+  ],
+  providers: [
+    OrderAggregateRepository,
+
+    PlaceOrderHandler,
+    CancelOrderHandler,
+    GetOrderHandler,
+    ReserveInventoryHandler,
+    ProcessPaymentHandler,
+  ],
+})
+export class AppModule {}
+```
+
+### Mark Events with `@DomainEvent`
+
+The `@DomainEvent` decorator associates events with aggregates and registers them in a global event registry. **Required** for source mode (used for aggregate hydration). **Optional** for audit mode (only populates `aggregate_type`/`aggregate_id` columns for easier querying — has no effect on runtime behavior).
+
+```typescript
+import { IEvent, DomainEvent } from '@rolandsall24/nest-mediator';
+
+@DomainEvent('Order', 'orderId')
 export class OrderPlacedEvent implements IEvent {
   constructor(
     public readonly orderId: string,
@@ -332,1350 +337,646 @@ export class OrderPlacedEvent implements IEvent {
     public readonly total: number,
   ) {}
 }
+
+@DomainEvent('Order', 'orderId')
+export class OrderCancelledEvent implements IEvent {
+  constructor(
+    public readonly orderId: string,
+    public readonly reason: string,
+  ) {}
+}
 ```
 
-#### 2. Create Event Consumers
+The first argument is the aggregate type name (must match `aggregateType` on your aggregate). The second is the property name holding the aggregate ID. The `@DomainEvent` decorator also auto-registers the event class so `AggregateRepository` can deserialize stored events without any manual wiring.
 
-**Critical consumer** (must succeed, runs in order):
+### Define an Aggregate
+
+The aggregate encapsulates business rules and tracks state changes as events.
 
 ```typescript
-import { Injectable, Logger } from '@nestjs/common';
-import { EventHandler, IEventConsumer, Critical } from '@rolandsall24/nest-mediator';
-import { OrderPlacedEvent } from './order-placed.event';
+import { AggregateRoot } from '@rolandsall24/nest-mediator';
 
-@Injectable()
-@EventHandler(OrderPlacedEvent)
-@Critical({ order: 1 })  // Runs first among critical consumers
-export class ValidateInventoryConsumer implements IEventConsumer<OrderPlacedEvent> {
-  private readonly logger = new Logger(ValidateInventoryConsumer.name);
+export class OrderAggregate extends AggregateRoot<string> {
+  private _orderId!: string;
+  private _customerId!: string;
+  private _items: { productId: string; quantity: number }[] = [];
+  private _total: number = 0;
+  private _status: 'placed' | 'cancelled' = 'placed';
 
-  async handle(event: OrderPlacedEvent): Promise<void> {
-    this.logger.log(`Validating inventory for order ${event.orderId}`);
-    // Validate all items are in stock
-    // Throw error if validation fails - stops the event processing
+  readonly aggregateType = 'Order';
+  get id() { return this._orderId; }
+  get status() { return this._status; }
+
+  // ── Command methods (enforce business rules, emit events) ──
+
+  static create(
+    orderId: string,
+    customerId: string,
+    items: { productId: string; quantity: number }[],
+    total: number,
+  ): OrderAggregate {
+    if (!items.length) throw new Error('Order must have at least one item');
+    const order = new OrderAggregate();
+    order.apply(new OrderPlacedEvent(orderId, customerId, items, total));
+    return order;
+  }
+
+  cancel(reason: string): void {
+    if (this._status === 'cancelled') {
+      throw new Error(`Order ${this._orderId} is already cancelled`);
+    }
+    this.apply(new OrderCancelledEvent(this._orderId, reason));
+  }
+
+  // ── Event handlers (update state from events) ──
+
+  applyOrderPlacedEvent(event: OrderPlacedEvent): void {
+    this._orderId = event.orderId;
+    this._customerId = event.customerId;
+    this._items = event.items;
+    this._total = event.total;
+    this._status = 'placed';
+  }
+
+  applyOrderCancelledEvent(event: OrderCancelledEvent): void {
+    this._status = 'cancelled';
   }
 }
 ```
 
-**Critical consumer with compensation** (implements rollback on failure):
+#### The `applyXxxEvent` Convention
+
+When you call `this.apply(new OrderPlacedEvent(...))`, the base class automatically looks for a method named `apply` + the event class name — in this case `applyOrderPlacedEvent`. This convention is used in two scenarios:
+
+1. **New events** — when a command method calls `this.apply(event)`, the handler updates state and the event is tracked as uncommitted.
+2. **Replayed events** — when loading from history via `loadFromHistory()`, the same handlers rebuild state from stored events.
+
+This means your aggregate's state mutation logic is written once and works for both paths. If a handler is missing, the library logs a warning for new events and silently skips during replay.
+
+### Define an Aggregate Repository
+
+With `@ForAggregate`, the repository is a one-liner. The decorator tells the base class which aggregate to instantiate, and the `@DomainEvent` registry handles event deserialization automatically.
 
 ```typescript
-import { Injectable, Logger } from '@nestjs/common';
-import { EventHandler, ICriticalEventConsumer, Critical } from '@rolandsall24/nest-mediator';
-import { OrderPlacedEvent } from './order-placed.event';
+import { Injectable } from '@nestjs/common';
+import { AggregateRepository, ForAggregate } from '@rolandsall24/nest-mediator';
 
 @Injectable()
-@EventHandler(OrderPlacedEvent)
-@Critical({ order: 2 })
-export class ReserveInventoryConsumer implements ICriticalEventConsumer<OrderPlacedEvent> {
-  private readonly logger = new Logger(ReserveInventoryConsumer.name);
+@ForAggregate(OrderAggregate)
+export class OrderAggregateRepository
+  extends AggregateRepository<OrderAggregate, string> {}
+```
 
+That's it. No constructor, no overrides. The base class provides:
+
+- **`findById(id)`** — loads events from the store, deserializes them via the `@DomainEvent` registry, and replays them to rebuild aggregate state
+- **`getById(id)`** — same as `findById` but throws if the aggregate doesn't exist
+- **`save(aggregate)`** — publishes each uncommitted event through the event bus (persistence + consumers)
+
+Need custom logic? Every method is overridable:
+
+```typescript
+@Injectable()
+@ForAggregate(OrderAggregate)
+export class OrderAggregateRepository
+  extends AggregateRepository<OrderAggregate, string>
+{
+  // Override any method for custom behavior
+  protected deserializeEvent(eventType: string, payload: Record<string, unknown>): IEvent {
+    // Custom deserialization logic
+  }
+}
+```
+
+### Use from Handlers
+
+```typescript
+@Injectable()
+@CommandHandler(PlaceOrderCommand)
+export class PlaceOrderHandler implements ICommandHandler<PlaceOrderCommand> {
+  constructor(private readonly orderRepository: OrderAggregateRepository) {}
+
+  async execute(command: PlaceOrderCommand): Promise<void> {
+    const order = OrderAggregate.create(
+      `order-${Date.now()}`,
+      command.customerId,
+      command.items,
+      command.total,
+    );
+
+    // Save publishes the event -> persistence -> critical consumers -> non-critical
+    await this.orderRepository.save(order);
+  }
+}
+
+@Injectable()
+@CommandHandler(CancelOrderCommand)
+export class CancelOrderHandler implements ICommandHandler<CancelOrderCommand> {
+  constructor(private readonly orderRepository: OrderAggregateRepository) {}
+
+  async execute(command: CancelOrderCommand): Promise<void> {
+    // Load aggregate (replays events -> rebuilds state + version)
+    const order = await this.orderRepository.findById(command.orderId);
+    if (!order) throw new OrderNotFoundException(command.orderId);
+
+    // Apply business rules, record OrderCancelledEvent
+    order.cancel(command.reason);
+
+    // Save with concurrency check — throws ConcurrencyError if version conflict
+    await this.orderRepository.save(order);
+  }
+}
+```
+
+### Optimistic Concurrency
+
+In source mode, each event stored for an aggregate carries a sequence number. When two requests load the same aggregate simultaneously, both see version N. The first to save writes version N+1 successfully. The second gets a `ConcurrencyError` because the version has advanced.
+
+```
+Request A: load(order) -> version 3 -> cancel() -> save() -> writes seq 4 ok
+Request B: load(order) -> version 3 -> cancel() -> save() -> expected 3, found 4 -> ConcurrencyError
+```
+
+The `example-source` project includes a `POST /orders/test-concurrency` endpoint that demonstrates this by placing an order and firing two cancel commands simultaneously.
+
+### When to use Source mode
+
+- You need a **complete history** of every state change
+- You want **optimistic concurrency** without manual locking
+- Your domain is complex enough to benefit from **aggregates and business rules**
+- You want to **rebuild state** at any point in time
+- You're building a **domain-driven** system where events are first-class citizens
+
+---
+
+## Core Concepts
+
+### Domain Events
+
+Domain events notify other parts of the system when something happens. Consumers come in two types:
+
+**Critical consumers** — run sequentially in order. Must succeed. Support compensation.
+
+```typescript
+@Injectable()
+@EventHandler(OrderPlacedEvent)
+@Critical({ order: 1 })
+export class ReserveInventoryHandler implements ICriticalEventConsumer<OrderPlacedEvent> {
   async handle(event: OrderPlacedEvent): Promise<void> {
-    this.logger.log(`Reserving inventory for order ${event.orderId}`);
-    // Reserve inventory in the database
+    // Reserve inventory — must succeed before payment
   }
 
-  // Called if a SUBSEQUENT critical consumer fails (e.g., ChargePayment at order 4)
-  async compensate(event: OrderPlacedEvent): Promise<void> {
-    this.logger.warn(`[COMPENSATE] Releasing inventory for order ${event.orderId}`);
+  // Called if a SUBSEQUENT critical consumer fails
+  async applyCompensatingEvent(event: OrderPlacedEvent): Promise<IEvent> {
+    return new InventoryReleasedEvent(event.orderId);
+  }
+}
+```
+
+**Non-critical consumers** — fire-and-forget. Failures are logged but don't affect the result.
+
+```typescript
+@Injectable()
+@EventHandler(OrderPlacedEvent)
+@NonCritical()
+export class SendConfirmationEmailHandler implements IEventConsumer<OrderPlacedEvent> {
+  async handle(event: OrderPlacedEvent): Promise<void> {
+    // Send email — failure doesn't block the order
+  }
+}
+```
+
+Consumers without `@Critical` or `@NonCritical` default to non-critical.
+
+### Event Execution Flow
+
+```
+publish(OrderPlacedEvent)
+    |
+    |-> System Phase (event store persistence)
+    |
+    |-> Critical Consumers (sequential, awaited)
+    |   |-> ReserveInventoryHandler  (order: 1)  ok  [has compensation]
+    |   |-> ProcessPaymentHandler    (order: 2)  FAILS
+    |   |
+    |   |   On failure -> compensations in REVERSE order:
+    |   |   '-> ReserveInventoryHandler.applyCompensatingEvent()
+    |   |         -> publishes InventoryReleasedEvent
+    |   |         -> persisted, dispatched to its own consumers
+    |   '-> Throw original error
+    |
+    '-> Non-Critical Consumers (parallel, fire-and-forget)
+        |-> SendConfirmationEmailHandler
+        '-> TrackAnalyticsHandler
+        Only runs if ALL critical consumers succeed
+```
+
+### Saga-Style Compensation
+
+Critical consumers can return compensating events when a later consumer in the chain fails. The library publishes these events through the full event flow — persisted, dispatched, traceable.
+
+```typescript
+@Injectable()
+@EventHandler(OrderPlacedEvent)
+@Critical({ order: 1 })
+export class ReserveInventoryHandler implements ICriticalEventConsumer<OrderPlacedEvent> {
+  constructor(private readonly mediatorBus: MediatorBus) {}
+
+  async handle(event: OrderPlacedEvent): Promise<void> {
+    // Reserve inventory...
+    await this.mediatorBus.publish(new InventoryReservedEvent(event.orderId, event.items));
+  }
+
+  // Return the compensating event — don't perform side effects here
+  async applyCompensatingEvent(event: OrderPlacedEvent): Promise<IEvent> {
+    return new InventoryReleasedEvent(event.orderId);
+  }
+}
+
+// Dedicated consumer where the actual rollback logic lives
+@Injectable()
+@EventHandler(InventoryReleasedEvent)
+export class HandleInventoryReleasedHandler implements IEventConsumer<InventoryReleasedEvent> {
+  async handle(event: InventoryReleasedEvent): Promise<void> {
     // Release the reserved inventory
   }
 }
 ```
 
-**Non-critical consumer** (fire-and-forget):
-
-```typescript
-import { Injectable, Logger } from '@nestjs/common';
-import { EventHandler, IEventConsumer, NonCritical } from '@rolandsall24/nest-mediator';
-import { OrderPlacedEvent } from './order-placed.event';
-
-@Injectable()
-@EventHandler(OrderPlacedEvent)
-@NonCritical()  // Runs in background after critical consumers
-export class SendOrderConfirmationConsumer implements IEventConsumer<OrderPlacedEvent> {
-  private readonly logger = new Logger(SendOrderConfirmationConsumer.name);
-
-  async handle(event: OrderPlacedEvent): Promise<void> {
-    this.logger.log(`Sending confirmation email for order ${event.orderId}`);
-    // Send email - failures are logged but don't affect the order
-  }
-}
-
-// Consumers without @Critical or @NonCritical default to non-critical
-@Injectable()
-@EventHandler(OrderPlacedEvent)
-export class TrackAnalyticsConsumer implements IEventConsumer<OrderPlacedEvent> {
-  async handle(event: OrderPlacedEvent): Promise<void> {
-    // Track analytics - non-critical by default
-  }
-}
-```
-
-#### 3. Publish Events from Command Handlers
-
-The recommended pattern is to publish domain events from command handlers after the main operation succeeds:
-
-```typescript
-import { Injectable, Logger } from '@nestjs/common';
-import { CommandHandler, ICommandHandler, MediatorBus } from '@rolandsall24/nest-mediator';
-import { PlaceOrderCommand } from './place-order.command';
-import { OrderPlacedEvent } from '../events/order-placed.event';
-
-@Injectable()
-@CommandHandler(PlaceOrderCommand)
-export class PlaceOrderHandler implements ICommandHandler<PlaceOrderCommand> {
-  private readonly logger = new Logger(PlaceOrderHandler.name);
-
-  constructor(private readonly mediatorBus: MediatorBus) {}
-
-  async execute(command: PlaceOrderCommand): Promise<void> {
-    const orderId = `order-${Date.now()}`;
-
-    // 1. Process the order (validate, save to DB, etc.)
-    this.logger.log(`Processing order ${orderId}`);
-    await this.processOrder(orderId, command);
-
-    // 2. Publish domain event after successful processing
-    // Critical consumers run sequentially, non-critical run in background
-    const result = await this.mediatorBus.publish(
-      new OrderPlacedEvent(
-        orderId,
-        command.customerId,
-        command.items,
-        command.total,
-      ),
-    );
-
-    this.logger.log(
-      `Order ${orderId} completed. Critical: ${result.criticalSucceeded}, Non-critical dispatched: ${result.nonCriticalDispatched}`,
-    );
-  }
-
-  private async processOrder(orderId: string, command: PlaceOrderCommand): Promise<void> {
-    // Order processing logic here
-  }
-}
-```
-
-#### 4. Event Execution Flow
-
-```
-publish(OrderPlacedEvent)
-    │
-    ├─► Critical Consumers (sequential, awaited)
-    │   ├─► ValidateInventoryConsumer (order: 1) ✓
-    │   ├─► ReserveInventoryConsumer (order: 2) ✓  [has compensate()]
-    │   ├─► CreateOrderRecordConsumer (order: 3) ✓ [has compensate()]
-    │   └─► ChargePaymentConsumer (order: 4) ✗ FAILS
-    │
-    │   On failure → Run compensations in REVERSE order:
-    │   ├─► CreateOrderRecordConsumer.compensate() - deletes order
-    │   └─► ReserveInventoryConsumer.compensate() - releases inventory
-    │   Then throw original error
-    │
-    └─► Non-Critical Consumers (parallel, fire-and-forget)
-        ├─► SendOrderConfirmationConsumer
-        ├─► NotifyWarehouseConsumer
-        └─► TrackAnalyticsConsumer
-
-        Only runs if ALL critical consumers succeed
-        Failures logged but don't affect the result
-```
-
-#### 5. Compensation Pattern (Saga)
-
-Critical consumers can implement the `ICriticalEventConsumer` interface with an optional `compensate()` method to support saga-style rollback:
-
-```typescript
-import { ICriticalEventConsumer, EventHandler, Critical } from '@rolandsall24/nest-mediator';
-
-@Injectable()
-@EventHandler(OrderPlacedEvent)
-@Critical({ order: 3 })
-export class CreateOrderRecordConsumer implements ICriticalEventConsumer<OrderPlacedEvent> {
-  async handle(event: OrderPlacedEvent): Promise<void> {
-    // Create order in database
-    await this.orderRepository.create({
-      id: event.orderId,
-      customerId: event.customerId,
-      items: event.items,
-      total: event.total,
-    });
-  }
-
-  async compensate(event: OrderPlacedEvent): Promise<void> {
-    // Rollback: delete the order record
-    await this.orderRepository.delete(event.orderId);
-  }
-}
-```
-
 **Compensation rules:**
-- Only called when a **subsequent** critical consumer fails (not if this consumer fails)
-- Runs in **reverse order** (last succeeded → first succeeded)
-- Receives the same event instance passed to `handle()`
-- Should be **idempotent** - safe to run multiple times
+- Runs in **reverse order** (last succeeded -> first succeeded)
+- The returned event is published through the full event flow (persisted + dispatched)
+- Should be **idempotent**
 - Errors in compensations are logged but don't stop other compensations
-- Non-critical consumers don't need compensation (they're fire-and-forget)
 
-#### 6. Register Event Consumers
+### Correlation & Causation IDs
 
-Add consumers to your module providers - they're auto-discovered via `@EventHandler`:
+The library automatically tracks two IDs through `AsyncLocalStorage` — no configuration needed.
 
-```typescript
-@Module({
-  imports: [NestMediatorModule.forRoot()],
-  providers: [
-    // Command handlers
-    PlaceOrderHandler,
+**Correlation ID** groups every event that stems from a single business transaction. When a command enters the system, a new `correlation_id` (UUID) is generated and propagated to every event published during that transaction, including events published by event handlers themselves.
 
-    // Event consumers - auto-discovered
-    ValidateInventoryConsumer,
-    ReserveInventoryConsumer,
-    CreateOrderRecordConsumer,
-    SendOrderConfirmationConsumer,
-    NotifyWarehouseConsumer,
-    TrackAnalyticsConsumer,
-  ],
-})
-export class AppModule {}
-```
-
-## Complete Example
-
-Here's a complete example following Domain-Driven Design principles with proper separation of concerns:
-
-### Project Structure
+**Causation ID** creates a parent-child link between events. When an event handler publishes a new event, the child's `causation_id` is set to the parent event's `event_id`. This lets you reconstruct the full causal chain.
 
 ```
-src/
-├── domain/
-│   ├── entities/
-│   │   ├── user.ts
-│   │   └── index.ts
-│   └── exceptions/
-│       ├── domain.exception.ts
-│       ├── user-not-found.exception.ts
-│       └── index.ts
-├── application/
-│   └── user/
-│       ├── create-user.command.ts
-│       ├── create-user.handler.ts
-│       ├── get-user.query.ts
-│       ├── get-user.handler.ts
-│       └── user-persistor.port.ts
-├── infrastructure/
-│   └── persistence/
-│       └── user/
-│           └── user-persistence.adapter.ts
-├── presentation/
-│   └── user/
-│       ├── create-user-api.request.ts
-│       ├── user-api.response.ts
-│       └── user.controller.ts
-└── app.module.ts
+PlaceOrderCommand                         correlation: abc
+  '-> OrderPlacedEvent                    correlation: abc, causation: null
+        |-> InventoryReservedEvent        correlation: abc, causation: <OrderPlacedEvent.id>
+        '-> PaymentChargedEvent           correlation: abc, causation: <OrderPlacedEvent.id>
+              '-> ReceiptGeneratedEvent   correlation: abc, causation: <PaymentChargedEvent.id>
 ```
 
-### Domain Layer
-
-#### domain/entities/user.ts
-
-```typescript
-export class User {
-  constructor(
-    public readonly id: string,
-    public readonly email: string,
-    public readonly name: string,
-    public readonly age: number,
-    public readonly createdAt: Date
-  ) {}
-
-  static create(params: {
-    id: string;
-    email: string;
-    name: string;
-    age: number;
-  }): User {
-    const now = new Date();
-    return new User(
-      params.id,
-      params.email,
-      params.name,
-      params.age,
-      now
-    );
-  }
-}
-```
-
-#### domain/exceptions/domain.exception.ts
-
-```typescript
-export class DomainException extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = this.constructor.name;
-  }
-}
-```
-
-#### domain/exceptions/user-not-found.exception.ts
-
-```typescript
-import { DomainException } from './domain.exception';
-
-export class UserNotFoundException extends DomainException {
-  constructor(userId: string) {
-    super(`User with id ${userId} not found`);
-  }
-}
-```
-
-### Application Layer
-
-#### application/user/create-user.command.ts
-
-```typescript
-import { ICommand } from '@rolandsall24/nest-mediator';
-
-export class CreateUserCommand implements ICommand {
-  constructor(
-    public readonly email: string,
-    public readonly name: string,
-    public readonly age: number
-  ) {}
-}
-```
-
-#### application/user/user-persistor.port.ts
-
-```typescript
-import { User } from '../../domain/entities/user';
-
-export interface UserPersistor {
-  save(user: User): Promise<User>;
-  findById(id: string): Promise<User | null>;
-}
-
-export const USER_PERSISTOR = Symbol('USER_PERSISTOR');
-```
-
-#### application/user/create-user.handler.ts
-
-```typescript
-import { Injectable, Inject } from '@nestjs/common';
-import { CommandHandler, ICommandHandler } from '@rolandsall24/nest-mediator';
-import { randomUUID } from 'crypto';
-import { CreateUserCommand } from './create-user.command';
-import { User } from '../../domain/entities/user';
-import { UserPersistor, USER_PERSISTOR } from './user-persistor.port';
-
-@Injectable()
-@CommandHandler(CreateUserCommand)
-export class CreateUserCommandHandler implements ICommandHandler<CreateUserCommand> {
-  constructor(
-    @Inject(USER_PERSISTOR)
-    private readonly userPersistor: UserPersistor
-  ) {}
-
-  async execute(command: CreateUserCommand): Promise<void> {
-    const id = randomUUID();
-
-    const user = User.create({
-      id,
-      email: command.email,
-      name: command.name,
-      age: command.age,
-    });
-
-    await this.userPersistor.save(user);
-  }
-}
-```
-
-#### application/user/get-user.query.ts
-
-```typescript
-import { IQuery } from '@rolandsall24/nest-mediator';
-
-export class GetUserQuery implements IQuery {
-  constructor(public readonly id: string) {}
-}
-```
-
-#### application/user/get-user.handler.ts
-
-```typescript
-import { Injectable, Inject } from '@nestjs/common';
-import { QueryHandler, IQueryHandler } from '@rolandsall24/nest-mediator';
-import { GetUserQuery } from './get-user.query';
-import { User } from '../../domain/entities/user';
-import { UserNotFoundException } from '../../domain/exceptions/user-not-found.exception';
-import { UserPersistor, USER_PERSISTOR } from './user-persistor.port';
-
-@Injectable()
-@QueryHandler(GetUserQuery)
-export class GetUserQueryHandler implements IQueryHandler<GetUserQuery, User> {
-  constructor(
-    @Inject(USER_PERSISTOR)
-    private readonly userPersistor: UserPersistor
-  ) {}
-
-  async execute(query: GetUserQuery): Promise<User> {
-    const user = await this.userPersistor.findById(query.id);
-
-    if (!user) {
-      throw new UserNotFoundException(query.id);
-    }
-
-    return user;
-  }
-}
-```
-
-### Infrastructure Layer
-
-#### infrastructure/persistence/user/user-persistence.adapter.ts
-
-```typescript
-import { Injectable } from '@nestjs/common';
-import { UserPersistor } from '../../../application/user/user-persistor.port';
-import { User } from '../../../domain/entities/user';
-
-@Injectable()
-export class UserPersistenceAdapter implements UserPersistor {
-  // In-memory storage for demonstration
-  private users: Map<string, User> = new Map();
-
-  async save(user: User): Promise<User> {
-    this.users.set(user.id, user);
-    return user;
-  }
-
-  async findById(id: string): Promise<User | null> {
-    return this.users.get(id) || null;
-  }
-}
-```
-
-### Presentation Layer
-
-#### presentation/user/create-user-api.request.ts
-
-```typescript
-export class CreateUserApiRequest {
-  email: string;
-  name: string;
-  age: number;
-}
-```
-
-#### presentation/user/user-api.response.ts
-
-```typescript
-export class UserApiResponse {
-  id: string;
-  email: string;
-  name: string;
-  age: number;
-  createdAt: Date;
-}
-```
-
-#### presentation/user/user.controller.ts
-
-```typescript
-import { Controller, Post, Body, Get, Param } from '@nestjs/common';
-import { MediatorBus } from '@rolandsall24/nest-mediator';
-import { CreateUserCommand } from '../../application/user/create-user.command';
-import { GetUserQuery } from '../../application/user/get-user.query';
-import { CreateUserApiRequest } from './create-user-api.request';
-import { UserApiResponse } from './user-api.response';
-
-@Controller('users')
-export class UserController {
-  constructor(private readonly mediator: MediatorBus) {}
-
-  @Post()
-  async create(@Body() request: CreateUserApiRequest): Promise<void> {
-    const command = new CreateUserCommand(
-      request.email,
-      request.name,
-      request.age
-    );
-
-    await this.mediator.send(command);
-  }
-
-  @Get(':id')
-  async getById(@Param('id') id: string): Promise<UserApiResponse> {
-    const query = new GetUserQuery(id);
-    const user = await this.mediator.query(query);
-
-    return {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      age: user.age,
-      createdAt: user.createdAt,
-    };
-  }
-}
-```
-
-### Module Configuration
-
-#### app.module.ts
-
-```typescript
-import { Module } from '@nestjs/common';
-import { NestMediatorModule } from '@rolandsall24/nest-mediator';
-import { UserController } from './presentation/user/user.controller';
-import { CreateUserCommandHandler } from './application/user/create-user.handler';
-import { GetUserQueryHandler } from './application/user/get-user.handler';
-import { USER_PERSISTOR } from './application/user/user-persistor.port';
-import { UserPersistenceAdapter } from './infrastructure/persistence/user/user-persistence.adapter';
-
-@Module({
-  imports: [
-    // Enable pipeline behaviors for logging, validation, and error handling
-    NestMediatorModule.forRoot({
-      enableLogging: true,
-      enableValidation: true,
-      enableExceptionHandling: true,
-    }),
-  ],
-  controllers: [UserController],
-  providers: [
-    // Infrastructure
-    {
-      provide: USER_PERSISTOR,
-      useClass: UserPersistenceAdapter,
-    },
-    // Handlers - automatically discovered and registered by the mediator
-    CreateUserCommandHandler,
-    GetUserQueryHandler,
-  ],
-})
-export class AppModule {}
-```
-
-### Key Benefits
-
-1. **Domain Layer**: Pure business logic, framework-agnostic
-   - Entities contain business rules and invariants
-   - Domain exceptions represent business errors
-
-2. **Application Layer**: Use cases and business workflows
-   - Commands/Queries define application operations
-   - Handlers orchestrate domain objects and ports
-   - Ports (interfaces) define contracts for infrastructure
-
-3. **Infrastructure Layer**: Technical implementations
-   - Adapters implement port interfaces
-   - Database, external services, file systems, etc.
-
-4. **Presentation Layer**: API interface
-   - Controllers handle HTTP concerns
-   - DTOs for API request/response
-   - No business logic
-
-This separation enables:
-- Easy testing (mock ports/adapters)
-- Technology independence (swap databases/frameworks)
-- Clear boundaries and responsibilities
-- Scalable architecture for growing applications
-
-## API Reference
-
-### Interfaces
-
-#### `ICommand`
-
-Marker interface for commands.
-
-```typescript
-export interface ICommand {}
-```
-
-#### `ICommandHandler<TCommand>`
-
-Interface for command handlers.
-
-```typescript
-export interface ICommandHandler<TCommand extends ICommand> {
-  execute(command: TCommand): Promise<void>;
-}
-```
-
-#### `IQuery`
-
-Marker interface for queries.
-
-```typescript
-export interface IQuery {}
-```
-
-#### `IQueryHandler<TQuery, TResult>`
-
-Interface for query handlers.
-
-```typescript
-export interface IQueryHandler<TQuery extends IQuery, TResult = any> {
-  execute(query: TQuery): Promise<TResult>;
-}
-```
-
-#### `IPipelineBehavior<TRequest, TResponse>`
-
-Interface for pipeline behaviors (cross-cutting concerns).
-
-```typescript
-export interface IPipelineBehavior<TRequest = any, TResponse = any> {
-  handle(request: TRequest, next: () => Promise<TResponse>): Promise<TResponse>;
-}
-```
-
-#### `IEvent`
-
-Marker interface for domain events.
-
-```typescript
-export interface IEvent {}
-```
-
-#### `IEventConsumer<TEvent>`
-
-Interface for event consumers (non-critical or critical without compensation).
-
-```typescript
-export interface IEventConsumer<TEvent extends IEvent> {
-  handle(event: TEvent): Promise<void>;
-}
-```
-
-#### `ICriticalEventConsumer<TEvent>`
-
-Interface for critical event consumers with optional compensation support (saga pattern).
-
-```typescript
-export interface ICriticalEventConsumer<TEvent extends IEvent> extends IEventConsumer<TEvent> {
-  /**
-   * Compensate/rollback the work done by handle().
-   * Called when a subsequent critical consumer fails.
-   * Should be idempotent and derive state from the event.
-   */
-  compensate?(event: TEvent): Promise<void>;
-}
-```
-
-#### `EventPublishResult`
-
-Result returned by `publish()`.
-
-```typescript
-export interface EventPublishResult {
-  totalHandlers: number;
-  criticalSucceeded: number;
-  nonCriticalDispatched: number;
-  compensationsRun: number;  // Number of compensations executed on failure
-}
-```
-
-#### `EventCriticality`
-
-Enum for event consumer criticality.
-
-```typescript
-export enum EventCriticality {
-  CRITICAL = 'critical',
-  NON_CRITICAL = 'non-critical',
-}
-```
-
-### Decorators
-
-#### `@CommandHandler(command)`
-
-Marks a class as a command handler.
-
-- **Parameters**: `command` - The command class this handler handles
-- **Usage**: Apply to handler classes that implement `ICommandHandler`
-
-#### `@QueryHandler(query)`
-
-Marks a class as a query handler.
-
-- **Parameters**: `query` - The query class this handler handles
-- **Usage**: Apply to handler classes that implement `IQueryHandler`
-
-#### `@PipelineBehavior(options?)`
-
-Marks a class as a pipeline behavior.
-
-- **Parameters**:
-  - `options.priority` - Execution order (lower numbers execute first, default: 0)
-  - `options.scope` - `'command'`, `'query'`, or `'all'` (default: `'all'`)
-- **Usage**: Apply to behavior classes that implement `IPipelineBehavior`
-
-#### `@Handle()`
-
-Method decorator that enables automatic request type inference for pipeline behaviors.
-
-- **Parameters**: None
-- **Usage**: Apply to the `handle` method to make the behavior type-specific
-
-```typescript
-// Generic behavior - applies to ALL requests in scope
-@Injectable()
-@PipelineBehavior({ priority: 0 })
-export class LoggingBehavior<TRequest, TResponse>
-  implements IPipelineBehavior<TRequest, TResponse> {
-  async handle(request: TRequest, next: () => Promise<TResponse>) {
-    // Runs for all requests
-    return next();
-  }
-}
-
-// Type-specific behavior - applies ONLY to CreateUserCommand
-@Injectable()
-@PipelineBehavior({ priority: 100, scope: 'command' })
-export class CreateUserValidationBehavior
-  implements IPipelineBehavior<CreateUserCommand, void> {
-  @Handle()  // <-- Enables type inference
-  async handle(request: CreateUserCommand, next: () => Promise<void>) {
-    // Only runs for CreateUserCommand
-    return next();
-  }
-}
-```
-
-#### `@SkipBehavior(behavior | behaviors[])`
-
-Excludes specific pipeline behaviors from a command or query.
-
-- **Parameters**:
-  - Single behavior class: `@SkipBehavior(PerformanceBehavior)`
-  - Array of behavior classes: `@SkipBehavior([PerformanceBehavior, LoggingBehavior])`
-- **Usage**: Apply to command or query classes
-- **Works with**: Both built-in behaviors and custom behaviors
-
-#### `@EventHandler(event)`
-
-Marks a class as an event consumer.
-
-- **Parameters**: `event` - The event class this consumer handles
-- **Usage**: Apply to consumer classes that implement `IEventConsumer`
-
-#### `@Critical(options?)`
-
-Marks an event consumer as critical. Critical consumers run sequentially in order.
-
-- **Parameters**:
-  - `options.order` - Execution order among critical consumers (lower numbers first, default: 0)
-- **Usage**: Apply to consumer classes alongside `@EventHandler`
-- **Behavior**: If a critical consumer fails, remaining critical consumers are skipped and non-critical consumers don't run
-
-#### `@NonCritical()`
-
-Marks an event consumer as non-critical. Non-critical consumers run in parallel after critical consumers complete.
-
-- **Parameters**: None
-- **Usage**: Apply to consumer classes alongside `@EventHandler`
-- **Behavior**: Fire-and-forget - failures are logged but don't affect the publish result
-- **Note**: Consumers without `@Critical` or `@NonCritical` default to non-critical
-
-### Services
-
-#### `MediatorBus`
-
-The main service for sending commands, queries, and events.
-
-##### Methods
-
-**`send<TCommand>(command: TCommand): Promise<void>`**
-
-Sends a command to its registered handler.
-
-- **Parameters**: `command` - The command instance to execute
-- **Returns**: Promise that resolves when the command is executed
-- **Throws**: `HandlerNotFoundException` if no handler is registered for the command
-
-**`query<TQuery, TResult>(query: TQuery): Promise<TResult>`**
-
-Executes a query through its registered handler.
-
-- **Parameters**: `query` - The query instance to execute
-- **Returns**: Promise that resolves with the query result
-- **Throws**: `HandlerNotFoundException` if no handler is registered for the query
-
-**`publish<TEvent>(event: TEvent): Promise<EventPublishResult>`**
-
-Publishes an event to all registered consumers.
-
-- **Parameters**: `event` - The event instance to publish
-- **Returns**: Promise with `EventPublishResult` containing:
-  - `totalHandlers` - Total number of consumers
-  - `criticalSucceeded` - Number of critical consumers that completed
-  - `nonCriticalDispatched` - Number of non-critical consumers dispatched
-- **Throws**: Error if any critical consumer fails
-
-### Module Configuration
-
-#### `NestMediatorModule.forRoot()`
-
-Basic module registration with no built-in behaviors.
-
-#### `NestMediatorModule.forRoot(options)`
-
-Module registration with configuration options.
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `enableLogging` | boolean | false | Enable request/response logging |
-| `enableValidation` | boolean | false | Enable class-validator validation |
-| `enableExceptionHandling` | boolean | false | Enable centralized exception logging |
-| `enablePerformanceTracking` | boolean | false | Enable slow request warnings |
-| `performanceThresholdMs` | number | 500 | Threshold for slow request warnings |
+Both IDs are stored in the event store automatically. This gives you:
+- **Transaction tracing** — query all events with the same `correlation_id` to see everything that happened in one business operation
+- **Causal ordering** — follow `causation_id` chains to understand what triggered what
+- **Debugging** — when something fails, trace the full event chain that led to the failure
+
+---
 
 ## Pipeline Behaviors
 
-Pipeline behaviors allow you to add cross-cutting concerns (like logging, validation, caching) that execute around every command and query handler.
-
-### Enabling Built-in Behaviors
-
-```typescript
-import { Module } from '@nestjs/common';
-import { NestMediatorModule } from '@rolandsall24/nest-mediator';
-
-@Module({
-  imports: [
-    NestMediatorModule.forRoot({
-      enableLogging: true,           // Logs request handling with timing
-      enableValidation: true,        // Validates requests using class-validator
-      enableExceptionHandling: true, // Centralized exception logging
-      enablePerformanceTracking: true, // Warns on slow requests
-      performanceThresholdMs: 500,   // Threshold for slow request warnings
-    }),
-  ],
-})
-export class AppModule {}
-```
+Behaviors wrap around command and query handlers for cross-cutting concerns.
 
 ### Built-in Behaviors
 
+```typescript
+NestMediatorModule.forRoot({
+  enableLogging: true,             // Log requests with timing
+  enableValidation: true,          // class-validator validation
+  enableExceptionHandling: true,   // Centralized error logging
+  enablePerformanceTracking: true, // Slow request warnings
+  performanceThresholdMs: 500,
+})
+```
+
 | Behavior | Priority | Description |
 |----------|----------|-------------|
-| `ExceptionHandlingBehavior` | -100 | Catches and logs all exceptions |
+| `ExceptionHandlingBehavior` | -100 | Catches and logs exceptions |
 | `LoggingBehavior` | 0 | Logs request handling with timing |
-| `PerformanceBehavior` | 10 | Warns when requests exceed threshold |
-| `ValidationBehavior` | 100 | Validates requests using class-validator |
+| `PerformanceBehavior` | 10 | Warns on slow requests |
+| `ValidationBehavior` | 100 | Validates using class-validator |
 
-### Creating Custom Behaviors
-
-```typescript
-import { Injectable } from '@nestjs/common';
-import { IPipelineBehavior, PipelineBehavior } from '@rolandsall24/nest-mediator';
-
-@Injectable()
-@PipelineBehavior({ priority: 50, scope: 'all' })
-export class MyCustomBehavior<TRequest, TResponse>
-  implements IPipelineBehavior<TRequest, TResponse> {
-
-  async handle(
-    request: TRequest,
-    next: () => Promise<TResponse>
-  ): Promise<TResponse> {
-    // Pre-processing logic
-    console.log('Before handler:', request);
-
-    // Call the next behavior or handler
-    const response = await next();
-
-    // Post-processing logic
-    console.log('After handler:', response);
-
-    return response;
-  }
-}
-```
-
-### Behavior Options
+### Custom Behaviors
 
 ```typescript
-@PipelineBehavior({
-  priority: 50,      // Lower numbers execute first (outermost)
-  scope: 'command',  // 'command', 'query', or 'all'
-})
-```
-
-**Priority Guidelines:**
-- `-100 to -1`: Exception handling (outermost)
-- `0 to 99`: Logging, performance tracking
-- `100 to 199`: Validation
-- `200+`: Transaction/Unit of Work (innermost)
-
-### Registering Custom Behaviors
-
-Custom behaviors with the `@PipelineBehavior` decorator are auto-discovered. Just add them to your module's providers:
-
-```typescript
-@Module({
-  imports: [NestMediatorModule.forRoot()],
-  providers: [MyCustomBehavior], // Auto-discovered via @PipelineBehavior decorator
-})
-export class AppModule {}
-```
-
-### Skipping Behaviors for Specific Commands/Queries
-
-Use `@SkipBehavior` to exclude specific behaviors from a command or query:
-
-```typescript
-import {
-  ICommand,
-  SkipBehavior,
-  PerformanceBehavior,
-  LoggingBehavior,
-} from '@rolandsall24/nest-mediator';
-
-// Skip a single behavior
-@SkipBehavior(PerformanceBehavior)
-export class HighFrequencyCommand implements ICommand {
-  // This command will not trigger performance tracking
-}
-
-// Skip multiple behaviors
-@SkipBehavior([PerformanceBehavior, LoggingBehavior])
-export class HealthCheckQuery implements IQuery {
-  // This query skips both performance and logging behaviors
-}
-```
-
-This works with both built-in behaviors and custom behaviors:
-
-```typescript
-import { SkipBehavior } from '@rolandsall24/nest-mediator';
-import { MyAuditBehavior } from './behaviors/audit.behavior';
-
-@SkipBehavior(MyAuditBehavior)
-export class InternalCommand implements ICommand {
-  // Skips your custom audit behavior
-}
-```
-
-### Custom Behavior with Service Injection
-
-Behaviors support full NestJS dependency injection:
-
-```typescript
-import { Injectable, Logger } from '@nestjs/common';
-import { IPipelineBehavior, PipelineBehavior } from '@rolandsall24/nest-mediator';
-
-// Service for audit logging
-@Injectable()
-export class AuditService {
-  private readonly logger = new Logger(AuditService.name);
-
-  async logAction(action: string, userId: string): Promise<void> {
-    this.logger.log(`[AUDIT] ${action} by ${userId}`);
-    // Save to database, send to external service, etc.
-  }
-}
-
-// Behavior that uses the service
 @Injectable()
 @PipelineBehavior({ priority: 50, scope: 'command' })
 export class AuditLoggingBehavior<TRequest, TResponse>
-  implements IPipelineBehavior<TRequest, TResponse> {
-
-  constructor(private readonly auditService: AuditService) {}
-
-  async handle(
-    request: TRequest,
-    next: () => Promise<TResponse>,
-  ): Promise<TResponse> {
-    const requestName = request.constructor.name;
-
-    await this.auditService.logAction(`Executing ${requestName}`, 'user-123');
-
-    const response = await next();
-
-    await this.auditService.logAction(`Completed ${requestName}`, 'user-123');
-
-    return response;
-  }
-}
-
-// Register both in your module
-@Module({
-  imports: [NestMediatorModule.forRoot()],
-  providers: [
-    AuditService,           // The service
-    AuditLoggingBehavior,   // The behavior (auto-discovered)
-  ],
-})
-export class AppModule {}
-```
-
-### Advanced Behavior Examples
-
-#### Retry Behavior (for transient failures)
-
-```typescript
-@Injectable()
-@PipelineBehavior({ priority: -50, scope: 'command' })
-export class RetryBehavior<TRequest, TResponse>
-  implements IPipelineBehavior<TRequest, TResponse> {
-
-  private readonly maxRetries = 3;
-
-  async handle(
-    request: TRequest,
-    next: () => Promise<TResponse>,
-  ): Promise<TResponse> {
-    let lastError: Error;
-
-    for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
-      try {
-        return await next();
-      } catch (error) {
-        lastError = error as Error;
-
-        // Don't retry validation errors
-        if (error.name?.includes('Validation')) throw error;
-
-        if (attempt < this.maxRetries) {
-          const delay = 100 * Math.pow(2, attempt - 1); // Exponential backoff
-          await new Promise(resolve => setTimeout(resolve, delay));
-        }
-      }
-    }
-
-    throw lastError!;
-  }
-}
-```
-
-#### Caching Behavior (for queries)
-
-```typescript
-@Injectable()
-@PipelineBehavior({ priority: 5, scope: 'query' })
-export class CachingBehavior<TRequest, TResponse>
-  implements IPipelineBehavior<TRequest, TResponse> {
-
-  private cache = new Map<string, { data: any; expiry: number }>();
-
-  async handle(
-    request: TRequest,
-    next: () => Promise<TResponse>,
-  ): Promise<TResponse> {
-    const key = JSON.stringify(request);
-    const cached = this.cache.get(key);
-
-    if (cached && cached.expiry > Date.now()) {
-      return cached.data; // Cache hit
-    }
-
+  implements IPipelineBehavior<TRequest, TResponse>
+{
+  async handle(request: TRequest, next: () => Promise<TResponse>): Promise<TResponse> {
+    console.log(`Executing ${request.constructor.name}`);
     const result = await next();
-
-    this.cache.set(key, {
-      data: result,
-      expiry: Date.now() + 30000, // 30 second TTL
-    });
-
+    console.log(`Completed ${request.constructor.name}`);
     return result;
-  }
-}
-```
-
-#### Authorization Behavior
-
-```typescript
-@Injectable()
-@PipelineBehavior({ priority: 25, scope: 'all' })
-export class AuthorizationBehavior<TRequest, TResponse>
-  implements IPipelineBehavior<TRequest, TResponse> {
-
-  constructor(private readonly authService: AuthService) {}
-
-  private readonly adminOnlyCommands = ['DeleteUserCommand'];
-
-  async handle(
-    request: TRequest,
-    next: () => Promise<TResponse>,
-  ): Promise<TResponse> {
-    const requestName = request.constructor.name;
-
-    if (!this.authService.isAuthenticated()) {
-      throw new UnauthorizedException('Authentication required');
-    }
-
-    if (this.adminOnlyCommands.includes(requestName)) {
-      if (!this.authService.hasRole('admin')) {
-        throw new ForbiddenException('Admin role required');
-      }
-    }
-
-    return next();
   }
 }
 ```
 
 ### Type-Specific Behaviors
 
-By default, behaviors apply to all requests matching their scope. To create a behavior that only applies to specific request types, add `@Handle()` to the `handle` method:
+Add `@Handle()` to make a behavior only run for a specific request type:
 
 ```typescript
-import { Injectable } from '@nestjs/common';
-import { IPipelineBehavior, PipelineBehavior, Handle } from '@rolandsall24/nest-mediator';
-import { CreateUserCommand } from './create-user.command';
-
 @Injectable()
 @PipelineBehavior({ priority: 95, scope: 'command' })
-export class CreateUserValidationBehavior
-  implements IPipelineBehavior<CreateUserCommand, void>
-{
-  @Handle()  // Enables type inference from method signature
-  async handle(
-    request: CreateUserCommand,
-    next: () => Promise<void>,
-  ): Promise<void> {
-    // This behavior ONLY runs for CreateUserCommand instances
-    // No manual instanceof check needed!
-
-    const errors: string[] = [];
-
-    if (!request.name || request.name.length < 2) {
-      errors.push('Name must be at least 2 characters');
-    }
-
-    if (!request.email || !request.email.includes('@')) {
-      errors.push('Valid email is required');
-    }
-
-    if (errors.length > 0) {
-      throw new Error(`Validation failed: ${errors.join(', ')}`);
-    }
-
+export class CreateUserValidation implements IPipelineBehavior<CreateUserCommand, void> {
+  @Handle()  // Only runs for CreateUserCommand
+  async handle(request: CreateUserCommand, next: () => Promise<void>): Promise<void> {
+    if (!request.email.includes('@')) throw new Error('Invalid email');
     return next();
   }
 }
 ```
 
-**How it works:**
-
-1. The `@Handle()` decorator on the `handle` method triggers TypeScript to emit `design:paramtypes` metadata
-2. At module initialization, the library reads this metadata to determine the request type (`CreateUserCommand`)
-3. During pipeline execution, the behavior is only included when `request instanceof CreateUserCommand` is true
-
-**Requirements:**
-- TypeScript `emitDecoratorMetadata: true` must be enabled in tsconfig.json
-- The request parameter must be a concrete class (not an interface or `any`)
-
-**Comparison:**
-
-| Without `@Handle()` | With `@Handle()` |
-|---------------------|------------------|
-| Behavior runs for ALL commands | Behavior runs ONLY for specified type |
-| Must use `instanceof` check inside handler | No `instanceof` check needed |
-| Generic `<TRequest, TResponse>` | Specific type like `<CreateUserCommand, void>` |
-
-### Complete Behavior Execution Order Example
-
-With the following behaviors configured:
+### Skip Behaviors
 
 ```typescript
-// Built-in behaviors (when enabled):
-// ExceptionHandlingBehavior: priority -100, scope 'all'
-// LoggingBehavior: priority 0, scope 'all'
-// PerformanceBehavior: priority 10, scope 'all'
-// ValidationBehavior: priority 100, scope 'all'
+@SkipBehavior(PerformanceBehavior)
+export class HighFrequencyCommand implements ICommand {}
 
-// Custom behaviors:
-// RetryBehavior: priority -50, scope 'command'
-// CachingBehavior: priority 5, scope 'query'
-// AuthorizationBehavior: priority 25, scope 'all'
-// AuditLoggingBehavior: priority 50, scope 'command'
+@SkipBehavior([PerformanceBehavior, LoggingBehavior])
+export class HealthCheckQuery implements IQuery {}
 ```
 
-**For a Command:**
+### Priority Guidelines
+
 ```
-Request → Exception(-100) → Retry(-50) → Logging(0) → Performance(10) → Authorization(25) → Audit(50) → Validation(100) → Handler
+-100 to -1:  Exception handling (outermost)
+0 to 99:     Logging, performance tracking
+100 to 199:  Validation
+200+:        Transaction / unit of work (innermost)
 ```
 
-**For a Query:**
-```
-Request → Exception(-100) → Logging(0) → Caching(5) → Performance(10) → Authorization(25) → Validation(100) → Handler
-```
+---
 
-### Validation with class-validator
+## Event Store Configuration
 
-When `enableValidation` is true, requests are validated using class-validator (if installed):
+The event store is flexible — you control how it connects, what repository it uses, and what table it writes to.
+
+### Connection Options
 
 ```typescript
-import { IsEmail, IsString, MinLength } from 'class-validator';
-import { ICommand } from '@rolandsall24/nest-mediator';
-
-export class CreateUserCommand implements ICommand {
-  @IsEmail()
-  email: string;
-
-  @IsString()
-  @MinLength(2)
-  name: string;
-
-  constructor(email: string, name: string) {
-    this.email = email;
-    this.name = name;
-  }
+// Option 1: Library manages the connection pool
+eventStore: {
+  type: 'postgres',
+  url: 'postgres://user:pass@localhost:5432/mydb',
+  mode: 'source',
 }
 
-// If validation fails, ValidationException is thrown with details
+// Option 2: Reuse an existing connection pool from your app
+eventStore: {
+  type: 'postgres',
+  useExistingPool: 'DATABASE_POOL',  // your DI token
+  mode: 'audit',
+}
+
+// Option 3: Bring your own IEventStoreRepository implementation
+eventStore: {
+  type: 'postgres',
+  url: 'postgres://...',             // used only for schema creation
+  useExistingRepository: 'MY_EVENT_STORE',  // your DI token
+  mode: 'source',
+}
 ```
 
-### How `next()` Works in Pipeline Behaviors
+### Custom Event Store Repository
 
-The `next()` function is a delegate that invokes the next behavior in the pipeline (or the final handler). Here's how it works:
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        REQUEST FLOW (→)                                  │
-│                                                                          │
-│  Request                                                                 │
-│     │                                                                    │
-│     ▼                                                                    │
-│  ┌──────────────────────┐                                               │
-│  │  Behavior A          │  1. Pre-processing (before next())            │
-│  │  (priority: -100)    │     - Wrap in try/catch                       │
-│  │                      │     - Start timer                             │
-│  │  return next() ──────┼──►                                            │
-│  └──────────────────────┘                                               │
-│                              │                                           │
-│                              ▼                                           │
-│                         ┌──────────────────────┐                        │
-│                         │  Behavior B          │  2. Pre-processing     │
-│                         │  (priority: 0)       │     - Log request      │
-│                         │                      │                        │
-│                         │  return next() ──────┼──►                     │
-│                         └──────────────────────┘                        │
-│                                                    │                     │
-│                                                    ▼                     │
-│                                               ┌──────────────────────┐  │
-│                                               │  Behavior C          │  │
-│                                               │  (priority: 100)     │  │
-│                                               │                      │  │
-│                                               │  return next() ──────┼──►
-│                                               └──────────────────────┘  │
-│                                                                         │
-│                                                    │                     │
-│                                                    ▼                     │
-│                                               ┌──────────────────────┐  │
-│                                               │      HANDLER         │  │
-│                                               │   execute(request)   │  │
-│                                               │                      │  │
-│                                               │  return result ◄─────┼──┤
-│                                               └──────────────────────┘  │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                       RESPONSE FLOW (←)                                  │
-│                                                                          │
-│  ┌──────────────────────┐                                               │
-│  │  Behavior A          │  4. Post-processing (after next() returns)    │
-│  │  (priority: -100)    │     - Catch errors                            │
-│  │                      │     - Calculate duration                      │
-│  │  ◄── result ─────────┼──                                             │
-│  └──────────────────────┘                                               │
-│         │                    ▲                                           │
-│         ▼                    │                                           │
-│      Response           ┌──────────────────────┐                        │
-│                         │  Behavior B          │  3. Post-processing    │
-│                         │  (priority: 0)       │     - Log response     │
-│                         │                      │     - Log duration     │
-│                         │  ◄── result ─────────┼──                      │
-│                         └──────────────────────┘                        │
-│                                                    ▲                     │
-│                                                    │                     │
-│                                               ┌──────────────────────┐  │
-│                                               │  Behavior C          │  │
-│                                               │  (priority: 100)     │  │
-│                                               │                      │  │
-│                                               │  ◄── result ─────────┼──┤
-│                                               └──────────────────────┘  │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-**Code Example:**
+If the built-in PostgreSQL repository doesn't fit your needs, implement `IEventStoreRepository` and register it yourself:
 
 ```typescript
 @Injectable()
-@PipelineBehavior({ priority: 0 })
-export class LoggingBehavior<TRequest, TResponse>
-  implements IPipelineBehavior<TRequest, TResponse>
+export class MyEventStoreRepository implements IEventStoreRepository {
+  async saveEvent(event: StoredEvent): Promise<void> { /* ... */ }
+  async appendEvents(aggregateType: string, aggregateId: string,
+    events: StoredEvent[], expectedVersion: number): Promise<void> { /* ... */ }
+  async getEventsForAggregate(aggregateType: string,
+    aggregateId: string): Promise<StoredEvent[]> { /* ... */ }
+  async getNextSequence(aggregateType: string,
+    aggregateId: string): Promise<number> { /* ... */ }
+}
+
+// Register in your module
+@Module({
+  providers: [
+    { provide: 'MY_EVENT_STORE', useClass: MyEventStoreRepository },
+  ],
+})
+export class PersistenceModule {}
+
+// Reference in config
+NestMediatorModule.forRoot({
+  eventStore: {
+    type: 'postgres',
+    url: process.env.DATABASE_URL,      // schema creation only
+    useExistingRepository: 'MY_EVENT_STORE',
+    mode: 'source',
+  },
+})
+```
+
+The library creates the schema using a temporary connection, then delegates all operations to your repository. The `AggregateRepository` base class injects the `EVENT_STORE_REPOSITORY` token, which resolves to whatever you provide.
+
+### Custom Repository Class
+
+Alternatively, pass a class and let the library instantiate it with the pool:
+
+```typescript
+eventStore: {
+  type: 'postgres',
+  url: process.env.DATABASE_URL,
+  repository: MyCustomPostgresEventStore,  // must implement IEventStoreRepository
+  mode: 'source',
+}
+```
+
+### Full Configuration Reference
+
+```typescript
+NestMediatorModule.forRoot({
+  enableLogging?: boolean,                  // default: false
+  enableValidation?: boolean,               // default: false
+  enableExceptionHandling?: boolean,        // default: false
+  enablePerformanceTracking?: boolean,      // default: false
+  performanceThresholdMs?: number,          // default: 500
+  eventStore?: {
+    type: 'postgres',
+    url?: string,                           // library-managed pool
+    useExistingPool?: string,               // reuse your pool (DI token)
+    useExistingRepository?: string,         // bring your own repo (DI token)
+    repository?: Type<IEventStoreRepository>, // custom repo class
+    mode?: 'audit' | 'source',             // default: 'audit'
+    tableName?: string,                     // default: 'domain_events'
+  },
+})
+```
+
+---
+
+## API Reference
+
+### Interfaces
+
+| Interface | Description |
+|-----------|-------------|
+| `ICommand` | Marker interface for commands |
+| `ICommandHandler<T>` | `execute(command: T): Promise<void>` |
+| `IQuery` | Marker interface for queries |
+| `IQueryHandler<T, R>` | `execute(query: T): Promise<R>` |
+| `IEvent` | Marker interface for events |
+| `IEventConsumer<T>` | `handle(event: T): Promise<void>` |
+| `ICriticalEventConsumer<T>` | Extends `IEventConsumer` with `applyCompensatingEvent()` |
+| `IPipelineBehavior<T, R>` | `handle(request: T, next: () => Promise<R>): Promise<R>` |
+| `IEventStoreRepository` | `saveEvent()`, `appendEvents()`, `getEventsForAggregate()`, `getNextSequence()` |
+| `AggregateRoot<TId>` | Base class for event-sourced aggregates |
+| `AggregateRepository<T, TId>` | Base class for aggregate repositories |
+
+### Decorators
+
+| Decorator | Target | Description |
+|-----------|--------|-------------|
+| `@CommandHandler(CommandClass)` | Class | Registers a command handler |
+| `@QueryHandler(QueryClass)` | Class | Registers a query handler |
+| `@EventHandler(EventClass)` | Class | Registers an event consumer |
+| `@Critical({ order: n })` | Class | Marks consumer as critical (sequential) |
+| `@NonCritical()` | Class | Marks consumer as non-critical (fire-and-forget) |
+| `@DomainEvent(aggregate, idProp)` | Class | Associates event with aggregate + registers in event registry. Required for source mode; optional in audit mode (adds `aggregate_type`/`aggregate_id` to logs) |
+| `@ForAggregate(AggregateClass)` | Class | Wires an `AggregateRepository` to its aggregate (zero-boilerplate) |
+| `@PipelineBehavior(options)` | Class | Registers a pipeline behavior |
+| `@Handle()` | Method | Enables type-specific behavior filtering |
+| `@SkipBehavior(behavior)` | Class | Excludes behaviors from a command/query |
+
+### MediatorBus
+
+| Method | Description |
+|--------|-------------|
+| `send<T>(command: T)` | Execute a command |
+| `query<T, R>(query: T)` | Execute a query |
+| `publish<T>(event: T)` | Publish an event to all consumers |
+
+---
+
+## Example Projects
+
+The repository includes two complete example projects demonstrating clean architecture (`domain/`, `application/`, `infrastructure/`, `presentation/`):
+
+### `example-audit/`
+
+**Audit mode** — Orders stored in a PostgreSQL `orders` table. Events logged to `audit_events` for traceability.
+
+```bash
+cd example-audit
+docker compose up -d                   # PostgreSQL on port 5433
+DATABASE_URL=postgres://postgres:postgres@localhost:5433/audit_example npm run start:dev
+```
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /orders` | Create an order (saved to `orders` table + event logged) |
+| `POST /orders/:id/cancel` | Cancel an order |
+| `GET /orders/:id` | Get order from `orders` table |
+| `GET /orders` | List all orders |
+| `GET /internals/events` | View audit event log |
+
+### `example-source/`
+
+**Source mode** — No `orders` table. State rebuilt entirely from events in `domain_events`.
+
+```bash
+cd example-source
+docker compose up -d                   # PostgreSQL on port 5434
+DATABASE_URL=postgres://postgres:postgres@localhost:5434/source_example npm run start:dev
+```
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /orders` | Place an order (event persisted, state rebuilt from events) |
+| `POST /orders/:id/cancel` | Cancel via aggregate pattern (load -> validate -> save) |
+| `GET /orders/:id` | Get order state (rebuilt by replaying events) |
+| `GET /orders/:id/events` | View raw event stream for an order |
+| `POST /orders/test-concurrency` | Demo: fires two cancels simultaneously, one gets `ConcurrencyError` |
+
+---
+
+## Migrating to v1.0.0
+
+### `AggregateRepository` — zero-boilerplate with `@ForAggregate`
+
+The `AggregateRepository` no longer requires a constructor, `aggregateType`, `createEmptyAggregate()`, or `deserializeEvent()` overrides. Use the `@ForAggregate` decorator instead.
+
+**Before:**
+
+```typescript
+@Injectable()
+export class OrderAggregateRepository
+  extends AggregateRepository<OrderAggregate, string>
 {
-  async handle(
-    request: TRequest,
-    next: () => Promise<TResponse>  // Delegate to next behavior/handler
-  ): Promise<TResponse> {
-    // ═══════════════════════════════════════════
-    // PRE-PROCESSING (runs BEFORE the handler)
-    // ═══════════════════════════════════════════
-    const start = Date.now();
-    console.log(`→ Handling ${request.constructor.name}...`);
+  protected readonly aggregateType = 'Order';
 
-    // ═══════════════════════════════════════════
-    // CALL NEXT (invokes next behavior or handler)
-    // ═══════════════════════════════════════════
-    const response = await next();
+  constructor(
+    @Inject(EVENT_STORE_REPOSITORY) eventStore: IEventStoreRepository,
+    mediatorBus: MediatorBus,
+  ) {
+    super(eventStore, mediatorBus);
+  }
 
-    // ═══════════════════════════════════════════
-    // POST-PROCESSING (runs AFTER the handler)
-    // ═══════════════════════════════════════════
-    const duration = Date.now() - start;
-    console.log(`← Handled ${request.constructor.name} in ${duration}ms`);
+  protected createEmptyAggregate(): OrderAggregate {
+    return new OrderAggregate();
+  }
 
-    return response;
+  protected deserializeEvent(eventType: string, payload: Record<string, unknown>): IEvent {
+    const types = { OrderPlacedEvent, OrderCancelledEvent };
+    const EventClass = types[eventType];
+    if (!EventClass) throw new Error(`Unknown event type: ${eventType}`);
+    return Object.assign(Object.create(EventClass.prototype), payload);
   }
 }
 ```
 
-**Key Points:**
+**After:**
 
-1. **`next()` is a function** that returns a `Promise` - you must `await` it
-2. **Code before `await next()`** runs during the request phase (pre-processing)
-3. **Code after `await next()`** runs during the response phase (post-processing)
-4. **Lower priority = outer wrapper** - executes first on request, last on response
-5. **Higher priority = inner wrapper** - executes last on request, first on response
-6. **If you don't call `next()`**, the handler never executes (useful for short-circuiting)
-7. **Exceptions propagate outward** through the `await next()` chain
-
-### Pipeline Execution Order
-
-With behaviors at priorities -100, 0, 10, 100:
-
-```
-Request → ExceptionHandling(-100) → Logging(0) → Performance(10) → Validation(100) → Handler
-Response ← ExceptionHandling(-100) ← Logging(0) ← Performance(10) ← Validation(100) ← Handler
+```typescript
+@Injectable()
+@ForAggregate(OrderAggregate)
+export class OrderAggregateRepository
+  extends AggregateRepository<OrderAggregate, string> {}
 ```
 
-## Best Practices
+The base class now uses property injection (`@Inject`) for `eventStore` and `eventBus`, derives `aggregateType` from the aggregate class, and uses the `@DomainEvent` registry for automatic event deserialization. All methods remain overridable for custom logic.
 
-1. **Keep Commands and Queries Simple**: They should be simple data containers with minimal logic.
+### `compensate()` -> `applyCompensatingEvent()`
 
-2. **One Handler Per Command/Query**: Each command or query should have exactly one handler.
+The `compensate()` method on `ICriticalEventConsumer` is **deprecated**. It performed side effects directly, which were not captured in the event store and not traceable.
 
-3. **Use Dependency Injection**: Inject required services into your handlers through the constructor.
+Use `applyCompensatingEvent()` instead — it returns a compensating event that the library publishes through the full event flow (persisted, dispatched, traceable).
 
-4. **Type Safety**: Always specify the return type for queries using the generic parameters.
+**Before (deprecated):**
 
-5. **Error Handling**: Implement proper error handling in your handlers.
+```typescript
+async compensate(event: OrderPlacedEvent): Promise<void> {
+  await this.inventoryService.release(event.orderId); // Side effect, not persisted
+}
+```
 
-6. **Validation**: Validate command/query data before creating instances or in the handler.
+**After:**
+
+```typescript
+async applyCompensatingEvent(event: OrderPlacedEvent): Promise<IEvent> {
+  return new InventoryReleasedEvent(event.orderId); // Event published through full flow
+}
+
+// Dedicated consumer for the compensating event
+@EventHandler(InventoryReleasedEvent)
+export class HandleInventoryReleasedHandler implements IEventConsumer<InventoryReleasedEvent> {
+  async handle(event: InventoryReleasedEvent): Promise<void> {
+    await this.inventoryService.release(event.orderId); // Logic lives here now
+  }
+}
+```
+
+### Other Changes
+
+- **`IEventHandler` renamed to `IEventConsumer`** — `IEventHandler` is a deprecated alias
+- **MediatorBus API unchanged** — `send()`, `query()`, `publish()` work as before
 
 ## License
 

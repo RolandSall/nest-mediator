@@ -76,23 +76,27 @@ export abstract class AggregateRepository<
    * Uses the global `@DomainEvent` registry to find the event class.
    * Can be overridden for custom deserialization logic.
    *
+   * Returns `null` for event types not registered for this aggregate.
+   * This is expected — side-effect events (e.g. InventoryReservedEvent)
+   * may be stored under the same aggregate ID but are not part of
+   * the aggregate's state and should be skipped during hydration.
+   *
    * @param eventType - The event class name
    * @param payload - The serialized event data
-   * @returns The deserialized event
+   * @returns The deserialized event, or null if the event type is not registered
    */
   protected deserializeEvent(
     eventType: string,
     payload: Record<string, unknown>
-  ): IEvent {
+  ): IEvent | null {
     const eventClasses = getEventClassesForAggregate(this.aggregateType);
     const EventClass = eventClasses.get(eventType);
 
     if (!EventClass) {
-      throw new Error(
-        `${this.constructor.name}: Unknown event type "${eventType}" for aggregate "${this.aggregateType}". ` +
-        `Ensure the event class is decorated with @DomainEvent('${this.aggregateType}', '<idField>') ` +
-        `and is imported at startup.`
+      this.logger.debug(
+        `Skipping event type "${eventType}" — not registered for aggregate "${this.aggregateType}"`
       );
+      return null;
     }
 
     return Object.assign(Object.create(EventClass.prototype), payload);
@@ -115,10 +119,10 @@ export abstract class AggregateRepository<
       return null;
     }
 
-    // Deserialize events
-    const events = storedEvents.map((stored) =>
-      this.deserializeEvent(stored.eventType, stored.payload)
-    );
+    // Deserialize events, filtering out side-effect events not owned by this aggregate
+    const events = storedEvents
+      .map((stored) => this.deserializeEvent(stored.eventType, stored.payload))
+      .filter((event): event is IEvent => event !== null);
 
     // Create aggregate and replay events
     const aggregate = this.createEmptyAggregate();
