@@ -1,0 +1,43 @@
+### SOURCE MODE EXAMPLE
+### Requires DATABASE_URL:
+### DATABASE_URL=postgres://postgres:postgres@localhost:5434/source_example npm run start:dev
+
+### Get info
+GET http://localhost:3000
+
+### Get status
+GET http://localhost:3000/status
+
+###
+### ORDER FLOW
+###
+
+### Place an order
+POST http://localhost:3000/orders
+Content-Type: application/json
+
+{
+  "customerId": "cust-123",
+  "items": [{"productId": "laptop", "quantity": 1}],
+  "total": 999.99
+}
+
+### Get order (state rebuilt from events)
+GET http://localhost:3000/orders/order-XXXXX
+
+### Get order event history
+GET http://localhost:3000/orders/order-XXXXX/events
+
+### Cancel order
+POST http://localhost:3000/orders/order-XXXXX/cancel
+Content-Type: application/json
+
+{
+  "reason": "Customer requested cancellation"
+}
+
+### Get order again (now shows cancelled status - rebuilt from 2 events)
+GET http://localhost:3000/orders/order-XXXXX
+
+### Get event history (now shows 2 events: OrderPlacedEvent, OrderCancelledEvent)
+GET http://localhost:3000/orders/order-XXXXX/events
