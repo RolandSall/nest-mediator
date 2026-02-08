@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { IEvent } from '../interfaces/index.js';
 
 /**
@@ -40,6 +41,8 @@ import { IEvent } from '../interfaces/index.js';
  * ```
  */
 export abstract class AggregateRoot<TId = string> {
+  private readonly logger = new Logger(this.constructor.name);
+
   /**
    * Events that have been applied but not yet persisted
    */
@@ -104,6 +107,12 @@ export abstract class AggregateRoot<TId = string> {
    * Apply a new event to the aggregate.
    * Call this from command methods to record state changes.
    *
+   * This method does two things:
+   * 1. Calls the matching handler method on your aggregate to update state.
+   *    The handler is found by convention: `apply` + event class name.
+   *    Example: `apply(new OrderPlacedEvent(...))` calls `this.applyOrderPlacedEvent(event)`.
+   * 2. Tracks the event as uncommitted so `AggregateRepository.save()` can publish it.
+   *
    * @param event - The event to apply
    */
   protected apply(event: IEvent): void {
@@ -123,9 +132,10 @@ export abstract class AggregateRoot<TId = string> {
 
     if (typeof handler === 'function') {
       handler.call(this, event);
-    } else {
-      // Handler is optional - some events may not need state changes
-      // but still need to be recorded for audit purposes
+    } else if (isNew) {
+      this.logger.warn(
+        `${this.constructor.name} is missing "${handlerName}(event: ${event.constructor.name}): void" to apply state changes`,
+      );
     }
 
     if (isNew) {

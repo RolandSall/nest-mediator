@@ -1,5 +1,9 @@
-import { IEvent, IEventBus, IEventStoreRepository, StoredEvent } from '../interfaces/index.js';
+import { Inject, Logger } from '@nestjs/common';
+import { IEvent, IEventBus, IEventStoreRepository, EVENT_STORE_REPOSITORY } from '../interfaces/index.js';
 import { AggregateRoot } from './aggregate-root.base.js';
+import { AGGREGATE_CLASS_METADATA } from '../decorators/for-aggregate.decorator.js';
+import { getEventClassesForAggregate } from '../decorators/domain-event.decorator.js';
+import { MediatorBus } from '../services/mediator.bus.js';
 
 /**
  * Base class for aggregate repositories in event sourcing.
@@ -8,7 +12,11 @@ import { AggregateRoot } from './aggregate-root.base.js';
  * - Loading: Replay events from event store to rebuild aggregate state
  * - Saving: Publish uncommitted events via event bus (which persists + dispatches to consumers)
  *
- * Concrete implementations must provide event deserialization logic.
+ * Use the `@ForAggregate(AggregateClass)` decorator to eliminate all boilerplate.
+ * The decorator + global `@DomainEvent` registry provide:
+ * - `aggregateType` — derived from a temporary aggregate instance
+ * - `createEmptyAggregate()` — instantiates the aggregate class
+ * - `deserializeEvent()` — looks up event classes from the `@DomainEvent` registry
  *
  * @template TAggregate - The aggregate type
  * @template TId - The aggregate's identifier type
@@ -16,59 +24,79 @@ import { AggregateRoot } from './aggregate-root.base.js';
  * @example
  * ```typescript
  * @Injectable()
- * class OrderRepository extends AggregateRepository<OrderAggregate, string> {
- *   protected readonly aggregateType = 'Order';
- *
- *   constructor(
- *     @Inject(EVENT_STORE_REPOSITORY) eventStore: IEventStoreRepository,
- *     eventBus: EventBus,
- *   ) {
- *     super(eventStore, eventBus);
- *   }
- *
- *   protected createEmptyAggregate(): OrderAggregate {
- *     return new OrderAggregate();
- *   }
- *
- *   protected deserializeEvent(eventType: string, payload: any): IEvent {
- *     const types = { OrderCreatedEvent, OrderPlacedEvent };
- *     const EventClass = types[eventType];
- *     return Object.assign(Object.create(EventClass.prototype), payload);
- *   }
- * }
+ * @ForAggregate(OrderAggregate)
+ * export class OrderRepository extends AggregateRepository<OrderAggregate, string>
+ *   implements IOrderRepository {}
  * ```
  */
 export abstract class AggregateRepository<
   TAggregate extends AggregateRoot<TId>,
   TId = string
 > {
-  constructor(
-    protected readonly eventStore: IEventStoreRepository,
-    protected readonly eventBus: IEventBus,
-  ) {}
+  private readonly logger = new Logger(this.constructor.name);
+
+  @Inject(EVENT_STORE_REPOSITORY)
+  protected readonly eventStore!: IEventStoreRepository;
+
+  @Inject(MediatorBus)
+  protected readonly eventBus!: IEventBus;
 
   /**
-   * The aggregate type name.
-   * Must match the aggregate's aggregateType property.
+   * The aggregate type name, derived from the aggregate class metadata.
+   * Lazily resolved on first access.
    */
-  protected abstract readonly aggregateType: string;
+  private _aggregateType?: string;
+
+  protected get aggregateType(): string {
+    if (!this._aggregateType) {
+      this._aggregateType = this.createEmptyAggregate().aggregateType;
+    }
+    return this._aggregateType;
+  }
 
   /**
    * Create an empty aggregate instance for hydration.
+   * Derived from the `@ForAggregate` decorator metadata.
+   * Can be overridden for custom instantiation logic.
    */
-  protected abstract createEmptyAggregate(): TAggregate;
+  protected createEmptyAggregate(): TAggregate {
+    const aggregateClass = Reflect.getMetadata(AGGREGATE_CLASS_METADATA, this.constructor);
+    if (!aggregateClass) {
+      throw new Error(
+        `${this.constructor.name}: Missing @ForAggregate() decorator. ` +
+        `Add @ForAggregate(YourAggregate) to your repository class, ` +
+        `or override createEmptyAggregate().`
+      );
+    }
+    return new aggregateClass() as TAggregate;
+  }
 
   /**
    * Deserialize a stored event back to an event instance.
+   * Uses the global `@DomainEvent` registry to find the event class.
+   * Can be overridden for custom deserialization logic.
    *
    * @param eventType - The event class name
    * @param payload - The serialized event data
    * @returns The deserialized event
    */
-  protected abstract deserializeEvent(
+  protected deserializeEvent(
     eventType: string,
     payload: Record<string, unknown>
-  ): IEvent;
+  ): IEvent {
+    const eventClasses = getEventClassesForAggregate(this.aggregateType);
+    const EventClass = eventClasses.get(eventType);
+
+    if (!EventClass) {
+      throw new Error(
+        `${this.constructor.name}: Unknown event type "${eventType}" for aggregate "${this.aggregateType}". ` +
+        `Ensure the event class is decorated with @DomainEvent('${this.aggregateType}', '<idField>') ` +
+        `and is imported at startup.`
+      );
+    }
+
+    return Object.assign(Object.create(EventClass.prototype), payload);
+  }
 
   /**
    * Find an aggregate by its ID.

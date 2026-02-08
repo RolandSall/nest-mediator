@@ -21,8 +21,27 @@ export interface DomainEventMetadata {
 }
 
 /**
+ * Global registry of domain event classes keyed by (aggregateType → className → EventClass).
+ * Populated automatically by the @DomainEvent decorator.
+ */
+const eventRegistry = new Map<string, Map<string, Function>>();
+
+/**
+ * Get all event classes registered for a given aggregate type.
+ *
+ * @param aggregateType - The aggregate type name (e.g., 'Order')
+ * @returns A map of event class name → event constructor, or an empty map
+ */
+export function getEventClassesForAggregate(aggregateType: string): Map<string, Function> {
+  return eventRegistry.get(aggregateType) ?? new Map();
+}
+
+/**
  * Decorator that marks an event as belonging to an aggregate.
  * Used for event sourcing to track which aggregate an event belongs to.
+ *
+ * Each decorated class is automatically registered in the global event registry,
+ * enabling automatic event deserialization in `AggregateRepository`.
  *
  * @param aggregateType - The aggregate type (e.g., 'Order', 'User')
  * @param aggregateIdField - The field name containing the aggregate ID (e.g., 'orderId')
@@ -48,5 +67,11 @@ export function DomainEvent(
       aggregateIdField,
     };
     Reflect.defineMetadata(DOMAIN_EVENT_METADATA, metadata, target);
+
+    // Register in global event registry
+    if (!eventRegistry.has(aggregateType)) {
+      eventRegistry.set(aggregateType, new Map());
+    }
+    eventRegistry.get(aggregateType)!.set(target.name, target);
   };
 }
