@@ -30,5 +30,7 @@ node_modules/
 .claude/
 ENHANCEMENT_PLAN.md
 
-# Example app (for development testing only)
+# Example apps (for development testing only)
 example/
+example-audit/
+example-source/

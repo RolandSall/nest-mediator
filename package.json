@@ -1,13 +1,32 @@
 {
   "name": "@rolandsall24/nest-mediator",
-  "version": "0.7.0",
+  "version": "1.0.0-rc.1",
   "description": "A lightweight CQRS (Command Query Responsibility Segregation) mediator pattern implementation for NestJS applications with optional event sourcing",
   "author": "Roland Salloum",
   "license": "MIT",
+  "homepage": "https://github.com/RolandSall/nest-mediator#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RolandSall/nest-mediator.git"
+  },
+  "bugs": {
+    "url": "https://github.com/RolandSall/nest-mediator/issues"
+  },
   "keywords": [
     "nestjs",
     "cqrs",
     "mediator",
+    "ddd",
+    "domain-driven-design",
+    "domain-events",
+    "event-sourcing",
+    "event-store",
+    "aggregate",
+    "saga",
+    "compensation",
+    "auditing",
+    "audit-trail",
+    "tracing",
     "command",
     "query",
     "handler",
@@ -15,10 +34,7 @@
     "typescript",
     "pipeline",
     "behaviors",
-    "validation",
-    "middleware",
-    "event-sourcing",
-    "event-store"
+    "validation"
   ],
   "main": "./dist/index.js",
   "module": "./dist/index.js",
