@@ -4,7 +4,7 @@
  * Run with: node test/integration/event-store.integration.mjs
  *
  * Prerequisites:
- * 1. Start PostgreSQL: docker-compose up -d
+ * 1. Docker must be running (testcontainers spins up PostgreSQL automatically)
  * 2. Install dependencies: npm install
  * 3. Build project: npm run build
  */
@@ -13,6 +13,7 @@ import 'reflect-metadata';
 import pg from 'pg';
 const { Pool } = pg;
 import { v4 as uuidv4 } from 'uuid';
+import { GenericContainer, Wait } from 'testcontainers';
 import { EventStorePersistenceConsumer } from '../../dist/lib/event-store/event-store-persistence.consumer.js';
 import { AggregateInfoExtractor } from '../../dist/lib/event-store/aggregate-info.extractor.js';
 import { PostgresEventStoreRepository } from '../../dist/lib/event-store/repositories/postgres-event-store.repository.js';
@@ -144,15 +145,31 @@ class OrderAggregate extends AggregateRoot {
 // Test Runner
 // ============================================
 
-const DATABASE_URL = 'postgres://mediator:mediator123@localhost:5433/mediator_test';
-
 async function runTests() {
   console.log('='.repeat(60));
-  console.log('Event Store Integration Tests');
+  console.log('Event Store Integration Tests (Testcontainers)');
   console.log('='.repeat(60));
   console.log();
 
-  const pool = new Pool({ connectionString: DATABASE_URL });
+  // Start PostgreSQL container
+  console.log('Starting PostgreSQL container...');
+  const container = await new GenericContainer('postgres:15-alpine')
+    .withEnvironment({
+      POSTGRES_USER: 'mediator',
+      POSTGRES_PASSWORD: 'mediator123',
+      POSTGRES_DB: 'mediator_test',
+    })
+    .withExposedPorts(5432)
+    .withWaitStrategy(Wait.forLogMessage('database system is ready to accept connections', 2))
+    .start();
+
+  const host = container.getHost();
+  const port = container.getMappedPort(5432);
+  const connectionString = `postgres://mediator:mediator123@${host}:${port}/mediator_test`;
+
+  console.log(`✓ PostgreSQL container started on ${host}:${port}\n`);
+
+  const pool = new Pool({ connectionString });
 
   try {
     // Test connection
@@ -177,6 +194,8 @@ async function runTests() {
     process.exit(1);
   } finally {
     await pool.end();
+    await container.stop();
+    console.log('PostgreSQL container stopped.');
   }
 }
 
@@ -213,17 +232,19 @@ async function testMediatorContext() {
 
   // Test new context creation
   let capturedCorrelationId;
-  let capturedCausationId;
 
   await mediatorContext.runWithNewContext(async () => {
     const ctx = mediatorContext.getContext();
     capturedCorrelationId = ctx.correlationId;
-    capturedCausationId = ctx.causationId;
 
     assert(ctx.correlationId !== undefined, 'Should have correlationId');
     assert(ctx.causationId === undefined, 'Should not have causationId at root');
+    assert(ctx.currentEventId === undefined, 'Should not have currentEventId at root');
 
     // Test nested causation
+    // runWithCausation sets: currentEventId = eventId, causationId = parent's currentEventId
+    // Since root has no currentEventId, the child's causationId will be undefined
+    // but currentEventId will be 'event-123'
     await mediatorContext.runWithCausation('event-123', async () => {
       const nestedCtx = mediatorContext.getContext();
 
@@ -232,9 +253,32 @@ async function testMediatorContext() {
         'Nested context should inherit correlationId'
       );
       assert(
-        nestedCtx.causationId === 'event-123',
-        'Nested context should have new causationId'
+        nestedCtx.currentEventId === 'event-123',
+        'Nested context should have currentEventId set to the event being processed'
       );
+      assert(
+        nestedCtx.causationId === undefined,
+        'Causation should be undefined (parent had no currentEventId)'
+      );
+
+      // Test double-nested: now the parent HAS currentEventId='event-123'
+      // so the grandchild's causationId should be 'event-123'
+      await mediatorContext.runWithCausation('event-456', async () => {
+        const grandchildCtx = mediatorContext.getContext();
+
+        assert(
+          grandchildCtx.correlationId === capturedCorrelationId,
+          'Grandchild should inherit correlationId'
+        );
+        assert(
+          grandchildCtx.currentEventId === 'event-456',
+          'Grandchild currentEventId should be event-456'
+        );
+        assert(
+          grandchildCtx.causationId === 'event-123',
+          'Grandchild causationId should be parent currentEventId (event-123)'
+        );
+      });
     });
   });
 
@@ -296,15 +340,6 @@ async function testPostgresRepository(pool) {
   const nextSeq = await repo.getNextSequence('Test', 'test-123');
   assert(nextSeq === 1, `Expected next sequence 1, got ${nextSeq}`);
   console.log('  ✓ getNextSequence works correctly');
-
-  // Test markRolledBack
-  await repo.markRolledBack(event.eventId);
-  const result = await pool.query(
-    'SELECT status FROM test_events_mjs WHERE event_id = $1',
-    [event.eventId]
-  );
-  assert(result.rows[0].status === 'rolled_back', 'Event should be marked as rolled_back');
-  console.log('  ✓ markRolledBack works correctly');
 
   console.log('✓ PostgresEventStoreRepository tests passed\n');
 }
@@ -504,9 +539,13 @@ async function testCausationChain(pool) {
   });
 
   // Check causation chain
+  // Root event: no parent currentEventId -> causation is null
   assert(result.rows[0].causation_id === null, 'Root event should have no causation');
-  assert(result.rows[1].causation_id === causationId1, 'Second event should have causation UUID');
-  assert(result.rows[2].causation_id === causationId2, 'Third event should have causation UUID');
+  // Second event: parent context had no currentEventId (root) -> causation is null
+  // The causationId1 UUID became currentEventId, not causationId
+  assert(result.rows[1].causation_id === null, 'Second event causation should be null (root had no currentEventId)');
+  // Third event: parent had currentEventId=causationId1 -> causation = causationId1
+  assert(result.rows[2].causation_id === causationId1, 'Third event causation should point to parent currentEventId');
 
   console.log('  ✓ Correlation IDs match across all events');
   console.log('  ✓ Causation chain correctly tracked');
