@@ -1,7 +1,8 @@
+// Order aggregate events
 export * from './order-placed.event';
 export * from './order-cancelled.event';
 
-// Chained events (published by side-effect handlers)
+// Side-effect events (not part of any aggregate - published by event consumers)
 export * from './inventory-reserved.event';
 export * from './payment-charged.event';
 export * from './confirmation-email-sent.event';
