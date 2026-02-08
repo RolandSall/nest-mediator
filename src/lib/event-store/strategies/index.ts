@@ -4,19 +4,14 @@ import { IEventStoreStrategy } from './event-store-strategy.interface.js';
 import { ExistingPoolStrategy } from './existing-pool.strategy.js';
 import { UrlConnectionStrategy } from './url-connection.strategy.js';
 import { CustomRepositoryStrategy } from './custom-repository.strategy.js';
-import { PersistenceConsumerStrategy } from './persistence-consumer.strategy.js';
+import { PersistenceConsumerRegistrar } from './persistence-consumer.strategy.js';
 
 // Interfaces
 export { IEventStoreStrategy } from './event-store-strategy.interface.js';
 export { ISchemaManager } from './schema-manager.interface.js';
 
-// Implementations
-export { PostgresSchemaManager } from './postgres-schema-manager.js';
-export { AbstractPostgresConnectionStrategy } from './abstract-postgres-connection.strategy.js';
-export { ExistingPoolStrategy } from './existing-pool.strategy.js';
-export { UrlConnectionStrategy } from './url-connection.strategy.js';
-export { CustomRepositoryStrategy } from './custom-repository.strategy.js';
-export { PersistenceConsumerStrategy } from './persistence-consumer.strategy.js';
+// Note: Concrete strategy implementations (ExistingPoolStrategy, UrlConnectionStrategy, etc.)
+// are intentionally kept internal. Users configure the event store via NestMediatorModule.forRoot().
 
 /**
  * Repository strategies - only ONE should match based on config.
@@ -27,11 +22,6 @@ const repositoryStrategies: IEventStoreStrategy[] = [
   new ExistingPoolStrategy(),      // Option 2: useExistingPool
   new UrlConnectionStrategy(),     // Option 1: url
 ];
-
-/**
- * Persistence consumer - always runs after repository is configured.
- */
-const persistenceConsumerStrategy = new PersistenceConsumerStrategy();
 
 /**
  * Configure event store by:
@@ -50,5 +40,7 @@ export function configureEventStore(
     }
   }
 
-  providers.push(...persistenceConsumerStrategy.invoke(config));
+  // 2. Always register the persistence consumer
+  const registrar = new PersistenceConsumerRegistrar();
+  providers.push(registrar.createProvider(config));
 }
