@@ -13,6 +13,7 @@ A lightweight CQRS mediator for NestJS — start simple, add event persistence w
 - **Flexible Event Store** — PostgreSQL-backed, bring your own pool or repository
 - **Optimistic Concurrency** — Sequence-based version control with `ConcurrencyError`
 - **Correlation & Causation IDs** — Automatic distributed tracing via `AsyncLocalStorage`
+- **MediatorFlow Dashboard** — Real-time visual monitoring, topology graphs, execution tracing
 - **Zero config** — Decorator-based auto-discovery, built on NestJS DI
 
 ## Installation
@@ -807,8 +808,154 @@ NestMediatorModule.forRoot({
     mode?: 'audit' | 'source',             // default: 'audit'
     tableName?: string,                     // default: 'domain_events'
   },
+  mediatorFlow?: {
+    enabled: boolean,                       // enable telemetry export
+    collectorUrl: string,                   // MediatorFlow server URL
+    serviceName?: string,                   // default: 'unknown'
+    batchSize?: number,                     // default: 50
+    flushIntervalMs?: number,               // default: 2000
+    includePayloads?: boolean,              // default: false
+    httpTimeoutMs?: number,                 // default: 3000
+  },
 })
 ```
+
+---
+
+## MediatorFlow — Visual Monitoring Dashboard
+
+MediatorFlow is a real-time monitoring dashboard that visualizes every command, query, event, and consumer execution in your application. It ships as a standalone server (`mediator-flow-server`) with an embedded React dashboard.
+
+```
+NestJS App (@rolandsall24/nest-mediator)
+    |
+    +---> POST /collect/topology     (on boot — sends full architecture map)
+    +---> POST /collect/steps        (batched — execution telemetry)
+    |
+    v
+MediatorFlow Server (NestJS + PostgreSQL)
+    |
+    v
+React Dashboard (topology graph, trace list, execution flow, stats)
+```
+
+### What You Get
+
+- **Real-time stats dashboard** — Throughput, error rate, top slow handlers, top errors at a glance
+- **Interactive topology graph** — Visual map of your entire CQRS architecture: commands, handlers, events, consumers, behaviors, and their connections. Click any node for details.
+- **Paginated trace list** — Every command/query execution as a trace with status, duration, step count. Search and filter by entry name, status, or service.
+- **Execution flow visualization** — Click a trace to see a full DAG (directed acyclic graph) showing the causation chain: which handler published which event, which consumers ran, where errors occurred.
+- **Sequence diagram view** — Step-by-step chronological view with compact mode for dense traces
+- **Compensation chain display** — When saga compensation fires, see the full rollback flow
+- **Category filtering** — Toggle visibility of commands, events, consumers, behaviors in any graph view
+- **Resizable graph nodes** — Drag to resize any node in topology or execution flow views
+
+### Quick Start — Docker (Recommended)
+
+One command to get the full stack (PostgreSQL + API + Dashboard) running:
+
+```bash
+cd mediator-flow-server
+npm run docker:up       # builds and starts on port 4800
+```
+
+Open [http://localhost:4800](http://localhost:4800) to see the dashboard.
+
+To stop:
+```bash
+npm run docker:down
+```
+
+### Quick Start — Local Development
+
+```bash
+cd mediator-flow-server
+
+# 1. Start PostgreSQL (port 5433)
+npm run dev:db
+
+# 2. Start API + UI with hot reload
+npm run dev:start
+
+# To stop everything:
+npm run dev:stop
+```
+
+The API runs on `http://localhost:4000` and the UI dev server on `http://localhost:5173`.
+
+### Enable Telemetry in Your App
+
+Add the `mediatorFlow` option to your module configuration. That's it — the library handles batching, flushing, and topology export automatically.
+
+```typescript
+import { Module } from '@nestjs/common';
+import { NestMediatorModule } from '@rolandsall24/nest-mediator';
+
+@Module({
+  imports: [
+    NestMediatorModule.forRoot({
+      enableLogging: true,
+      mediatorFlow: {
+        enabled: true,
+        collectorUrl: 'http://localhost:4800',  // MediatorFlow server URL
+        serviceName: 'order-service',           // identifies your service in the dashboard
+      },
+    }),
+  ],
+  providers: [/* your handlers, consumers, etc. */],
+})
+export class AppModule {}
+```
+
+### Configuration Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `enabled` | — | Enable/disable telemetry export |
+| `collectorUrl` | — | MediatorFlow server URL (e.g., `http://localhost:4800`) |
+| `serviceName` | `'unknown'` | Service name shown in the dashboard |
+| `batchSize` | `50` | Number of steps to buffer before flushing |
+| `flushIntervalMs` | `2000` | Maximum time between flushes (ms) |
+| `includePayloads` | `false` | Include command/event payloads in telemetry (may contain sensitive data) |
+| `httpTimeoutMs` | `3000` | Timeout for HTTP flush calls to the collector |
+
+### How It Works
+
+**On application boot**, the library sends your full architecture topology to the MediatorFlow server — every registered command, handler, event, consumer (with criticality and compensation info), behavior (with priority and scope), and aggregate. This builds the topology graph.
+
+**During runtime**, every execution step is captured as a lightweight telemetry event:
+
+| Step Type | When |
+|-----------|------|
+| `COMMAND_DISPATCHED` | Command enters the mediator |
+| `COMMAND_HANDLER_STARTED/COMPLETED/FAILED` | Handler lifecycle |
+| `QUERY_DISPATCHED` | Query enters the mediator |
+| `QUERY_HANDLER_STARTED/COMPLETED/FAILED` | Handler lifecycle |
+| `BEHAVIOR_ENTERED/COMPLETED/FAILED` | Pipeline behavior execution |
+| `EVENT_PUBLISHED` | Event dispatched to consumers |
+| `CRITICAL_CONSUMER_STARTED/COMPLETED/FAILED` | Critical consumer lifecycle |
+| `NONCRITICAL_CONSUMER_DISPATCHED/COMPLETED/FAILED` | Non-critical consumer lifecycle |
+| `COMPENSATION_STARTED/COMPLETED/FAILED` | Compensation chain execution |
+| `COMPENSATING_EVENT_PUBLISHED` | Compensating event emitted |
+
+Steps are buffered in memory and flushed to the server in batches — either when the buffer reaches `batchSize` or every `flushIntervalMs`, whichever comes first. Flushing is fire-and-forget: if the server is down, steps are dropped and the application continues normally.
+
+Each step carries the `correlationId` and `causationId` from `AsyncLocalStorage`, so the dashboard can reconstruct the full execution tree for any trace.
+
+### External Database
+
+By default, Docker mode runs PostgreSQL inside the container. To use an external database (e.g., AWS RDS):
+
+```bash
+DATABASE_URL=postgres://user:pass@your-rds.amazonaws.com:5432/mediatorflow \
+  docker compose up -d
+```
+
+The embedded PostgreSQL is automatically skipped when `DATABASE_URL` points to a non-localhost host. Schema migrations run against the external database.
+
+### Zero Overhead When Disabled
+
+When `mediatorFlow.enabled` is `false` (or not set), the `StepEmitter` is still registered as a NestJS provider but its `emit()` method returns immediately on line 1 — zero allocation, zero network calls. The `wrapAsync()` method skips telemetry entirely and just executes your function directly. There is no performance impact when telemetry is off.
 
 ---
 
