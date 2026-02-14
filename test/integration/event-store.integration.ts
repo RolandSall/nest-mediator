@@ -2,7 +2,7 @@
  * Event Store Integration Test
  *
  * This file demonstrates and tests the event store functionality.
- * Run with: npx ts-node test/integration/event-store.integration.ts
+ * Run with: npx tsx test/integration/event-store.integration.ts
  *
  * Prerequisites:
  * 1. Start PostgreSQL: docker-compose up -d
@@ -12,13 +12,14 @@
 import 'reflect-metadata';
 import { Pool } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
-import { PostgresEventStoreRepository } from '../../dist/lib/event-store/repositories/postgres-event-store.repository.js';
-import { EventStorePersistenceConsumer } from '../../dist/lib/event-store/event-store-persistence.consumer.js';
-import { AggregateInfoExtractor } from '../../dist/lib/event-store/aggregate-info.extractor.js';
-import { mediatorContext } from '../../dist/lib/context/mediator-context.js';
-import { DomainEvent } from '../../dist/lib/decorators/domain-event.decorator.js';
-import { IEvent, EventStoreConfig, StoredEvent } from '../../dist/lib/interfaces/index.js';
-import { AggregateRoot } from '../../dist/lib/aggregate/aggregate-root.base.js';
+import { PostgresEventStoreRepository } from '../../src/lib/event-store/repositories/postgres-event-store.repository';
+import { EventStorePersistenceConsumer } from '../../src/lib/event-store/event-store-persistence.consumer';
+import { AggregateInfoExtractor } from '../../src/lib/event-store/aggregate-info.extractor';
+import { mediatorContext } from '../../src/lib/context/mediator-context';
+import { DomainEvent } from '../../src/lib/decorators/domain-event.decorator';
+import { IEvent, EventStoreConfig, StoredEvent } from '../../src/lib/interfaces/index';
+import { AggregateRoot } from '../../src/lib/aggregate/aggregate-root.base';
+import { getPostgresSchema } from '../../src/lib/event-store/schema/postgres.schema';
 
 // ============================================
 // Test Events
@@ -137,6 +138,14 @@ class OrderAggregate extends AggregateRoot<string> {
 
 const DATABASE_URL = 'postgres://mediator:mediator123@localhost:5433/mediator_test';
 
+/**
+ * Create the schema for a given table using the library's schema generator.
+ */
+async function ensureSchema(pool: Pool, tableName: string): Promise<void> {
+  const schema = getPostgresSchema(tableName);
+  await pool.query(schema);
+}
+
 async function runTests(): Promise<void> {
   console.log('='.repeat(60));
   console.log('Event Store Integration Tests');
@@ -215,6 +224,8 @@ async function testMediatorContext(): Promise<void> {
     assert(ctx.causationId === undefined, 'Should not have causationId at root');
 
     // Test nested causation
+    // runWithCausation sets currentEventId to the given eventId,
+    // and causationId to the parent's currentEventId (undefined at root).
     await mediatorContext.runWithCausation('event-123', async () => {
       const nestedCtx = mediatorContext.getContext();
 
@@ -223,9 +234,31 @@ async function testMediatorContext(): Promise<void> {
         'Nested context should inherit correlationId'
       );
       assert(
-        nestedCtx.causationId === 'event-123',
-        'Nested context should have new causationId'
+        nestedCtx.currentEventId === 'event-123',
+        'Nested context should have currentEventId set to the event being processed'
       );
+      assert(
+        nestedCtx.causationId === undefined,
+        'Causation should be undefined (parent root has no currentEventId)'
+      );
+
+      // Double-nested: the child's causationId should be the parent's currentEventId
+      await mediatorContext.runWithCausation('event-456', async () => {
+        const deepCtx = mediatorContext.getContext();
+
+        assert(
+          deepCtx.correlationId === capturedCorrelationId,
+          'Deep nested context should inherit correlationId'
+        );
+        assert(
+          deepCtx.currentEventId === 'event-456',
+          'Deep nested context should have its own currentEventId'
+        );
+        assert(
+          deepCtx.causationId === 'event-123',
+          'Deep nested causationId should be parent currentEventId'
+        );
+      });
     });
   });
 
@@ -255,20 +288,21 @@ async function testPostgresRepository(pool: Pool): Promise<void> {
   console.log('Test: PostgresEventStoreRepository');
   console.log('-'.repeat(40));
 
-  const repo = new PostgresEventStoreRepository(pool, 'test_events');
+  const tableName = 'test_events';
+  await ensureSchema(pool, tableName);
+  console.log('  ✓ Schema created successfully');
 
-  await repo.migrate();
-  console.log('  ✓ Migrations ran successfully');
+  await pool.query(`DELETE FROM ${tableName}`);
 
-  await pool.query('DELETE FROM test_events');
+  const repo = new PostgresEventStoreRepository(pool, tableName, false);
 
+  // Test saveEvent
   const event: StoredEvent = {
     eventId: uuidv4(),
     eventType: 'TestEvent',
     payload: { message: 'Hello, World!' },
     occurredAt: new Date(),
     storedAt: new Date(),
-    status: 'committed',
     correlationId: uuidv4(),
     causationId: undefined,
     metadata: { test: true },
@@ -280,17 +314,15 @@ async function testPostgresRepository(pool: Pool): Promise<void> {
   await repo.saveEvent(event);
   console.log('  ✓ Event saved successfully');
 
+  // Test getNextSequence
   const nextSeq = await repo.getNextSequence('Test', 'test-123');
   assert(nextSeq === 1, `Expected next sequence 1, got ${nextSeq}`);
   console.log('  ✓ getNextSequence works correctly');
 
-  await repo.markRolledBack(event.eventId);
-  const result = await pool.query(
-    'SELECT status FROM test_events WHERE event_id = $1',
-    [event.eventId]
-  );
-  assert(result.rows[0].status === 'rolled_back', 'Event should be marked as rolled_back');
-  console.log('  ✓ markRolledBack works correctly');
+  // Test getEventsForAggregate (should be empty — event has no sequence_number)
+  const events = await repo.getEventsForAggregate('Test', 'test-123');
+  assert(events.length === 0, `Expected 0 sequenced events, got ${events.length}`);
+  console.log('  ✓ getEventsForAggregate filters non-sequenced events correctly');
 
   console.log('✓ PostgresEventStoreRepository tests passed\n');
 }
@@ -299,9 +331,11 @@ async function testAuditMode(pool: Pool): Promise<void> {
   console.log('Test: Audit Mode');
   console.log('-'.repeat(40));
 
-  const repo = new PostgresEventStoreRepository(pool, 'audit_events');
-  await repo.migrate();
-  await pool.query('DELETE FROM audit_events');
+  const tableName = 'audit_events';
+  await ensureSchema(pool, tableName);
+  await pool.query(`DELETE FROM ${tableName}`);
+
+  const repo = new PostgresEventStoreRepository(pool, tableName, false);
 
   const config: EventStoreConfig = {
     type: 'postgres',
@@ -318,7 +352,7 @@ async function testAuditMode(pool: Pool): Promise<void> {
     await consumer.handle(loginEvent);
   });
 
-  const result = await pool.query('SELECT * FROM audit_events ORDER BY stored_at');
+  const result = await pool.query(`SELECT * FROM ${tableName} ORDER BY stored_at`);
 
   assert(result.rows.length === 2, `Expected 2 events, got ${result.rows.length}`);
 
@@ -340,9 +374,11 @@ async function testSourceMode(pool: Pool): Promise<void> {
   console.log('Test: Source Mode');
   console.log('-'.repeat(40));
 
-  const repo = new PostgresEventStoreRepository(pool, 'source_events');
-  await repo.migrate();
-  await pool.query('DELETE FROM source_events');
+  const tableName = 'source_events';
+  await ensureSchema(pool, tableName);
+  await pool.query(`DELETE FROM ${tableName}`);
+
+  const repo = new PostgresEventStoreRepository(pool, tableName, false);
 
   const config: EventStoreConfig = {
     type: 'postgres',
@@ -362,7 +398,7 @@ async function testSourceMode(pool: Pool): Promise<void> {
 
   // Verify events were saved with sequence numbers
   const result = await pool.query(
-    `SELECT * FROM source_events
+    `SELECT * FROM ${tableName}
      WHERE aggregate_type = 'Order' AND aggregate_id = $1
      ORDER BY sequence_number`,
     [orderId]
@@ -395,7 +431,7 @@ async function testAggregateReconstruction(pool: Pool): Promise<void> {
   console.log('Test: Aggregate Reconstruction');
   console.log('-'.repeat(40));
 
-  const repo = new PostgresEventStoreRepository(pool, 'source_events');
+  const repo = new PostgresEventStoreRepository(pool, 'source_events', false);
 
   // Get events for the order from previous test
   const orderId = 'order-source-1';
@@ -432,9 +468,11 @@ async function testCausationChain(pool: Pool): Promise<void> {
   console.log('Test: Causation Chain');
   console.log('-'.repeat(40));
 
-  const repo = new PostgresEventStoreRepository(pool, 'causation_events');
-  await repo.migrate();
-  await pool.query('DELETE FROM causation_events');
+  const tableName = 'causation_events';
+  await ensureSchema(pool, tableName);
+  await pool.query(`DELETE FROM ${tableName}`);
+
+  const repo = new PostgresEventStoreRepository(pool, tableName, false);
 
   const config: EventStoreConfig = {
     type: 'postgres',
@@ -444,6 +482,10 @@ async function testCausationChain(pool: Pool): Promise<void> {
   const consumer = new EventStorePersistenceConsumer(repo, config);
   let rootCorrelationId: string | undefined;
 
+  // Use valid UUIDs for event IDs (required by the UUID column type)
+  const eventId1 = uuidv4();
+  const eventId2 = uuidv4();
+
   // Simulate command → event → handler publishes more events
   await mediatorContext.runWithNewContext(async () => {
     rootCorrelationId = mediatorContext.getCorrelationId();
@@ -452,11 +494,11 @@ async function testCausationChain(pool: Pool): Promise<void> {
     await consumer.handle(new OrderCreatedEvent('order-chain-1', 'customer-1'));
 
     // Simulate event handler publishing child events
-    await mediatorContext.runWithCausation('event-1', async () => {
+    await mediatorContext.runWithCausation(eventId1, async () => {
       await consumer.handle(new OrderItemAddedEvent('order-chain-1', 'product-1', 1));
 
       // Nested handler
-      await mediatorContext.runWithCausation('event-2', async () => {
+      await mediatorContext.runWithCausation(eventId2, async () => {
         await consumer.handle(new OrderPlacedEvent('order-chain-1', 50.0));
       });
     });
@@ -465,7 +507,7 @@ async function testCausationChain(pool: Pool): Promise<void> {
   // Verify causation chain
   const result = await pool.query(
     `SELECT event_type, correlation_id, causation_id
-     FROM causation_events ORDER BY stored_at`
+     FROM ${tableName} ORDER BY stored_at`
   );
 
   assert(result.rows.length === 3, 'Should have 3 events');
@@ -479,9 +521,15 @@ async function testCausationChain(pool: Pool): Promise<void> {
   });
 
   // Check causation chain
+  // Root context has no currentEventId, so:
+  //   - Event 0 (root): causationId = undefined (no parent)
+  //   - Event 1 (inside runWithCausation(eventId1)): causationId = root's currentEventId = undefined
+  //     BUT currentEventId = eventId1
+  //   - Event 2 (inside runWithCausation(eventId2)): causationId = parent's currentEventId = eventId1
+  //     AND currentEventId = eventId2
   assert(result.rows[0].causation_id === null, 'Root event should have no causation');
-  assert(result.rows[1].causation_id === 'event-1', 'Second event should have causation event-1');
-  assert(result.rows[2].causation_id === 'event-2', 'Third event should have causation event-2');
+  assert(result.rows[1].causation_id === null, 'Second event causation should be null (root has no currentEventId)');
+  assert(result.rows[2].causation_id === eventId1, 'Third event should have causation eventId1');
 
   console.log('  ✓ Correlation IDs match across all events');
   console.log('  ✓ Causation chain correctly tracked');
