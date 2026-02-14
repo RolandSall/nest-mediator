@@ -1,0 +1,39 @@
+# Production: all-in-one image (PostgreSQL + API + UI bundled together).
+#
+# By default, PostgreSQL runs INSIDE the container (embedded mode).
+# To use an EXTERNAL database, set DATABASE_URL to point to your managed instance:
+#
+#   DATABASE_URL=postgres://user:pass@my-rds.amazonaws.com:5432/mediatorflow
+#
+# When DATABASE_URL points to any host other than localhost/127.0.0.1, the
+# embedded PostgreSQL is automatically skipped. The schema migration still
+# runs against the external database.
+#
+# Usage:
+#   npm run docker:up       # build & start (embedded DB)
+#   npm run docker:down     # stop & remove container
+#
+# External DB:
+#   DATABASE_URL=postgres://user:pass@host:5432/db docker compose up -d
+
+services:
+  mediatorflow:
+    build: .
+    image: mediatorflow:latest
+    container_name: mediatorflow
+    ports:
+      - '4800:4800'
+    volumes:
+      - mediatorflow-data:/var/lib/postgresql/data
+    environment:
+      PORT: 4800
+      POSTGRES_USER: mediatorflow
+      POSTGRES_PASSWORD: mediatorflow
+      POSTGRES_DB: mediatorflow
+      # Point to an external DB to skip embedded PostgreSQL:
+      # DATABASE_URL: postgres://user:pass@external-host:5432/mediatorflow
+      DATABASE_URL: postgres://mediatorflow:mediatorflow@localhost:5432/mediatorflow
+    restart: unless-stopped
+
+volumes:
+  mediatorflow-data:

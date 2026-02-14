@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+}
+
+/* React Flow dark theme overrides */
+.react-flow__minimap {
+  background-color: rgb(17, 24, 39) !important;
+}
+
+.react-flow__controls {
+  border: 1px solid #374151 !important;
+  box-shadow: none !important;
+  border-radius: 6px !important;
+  overflow: hidden;
+}
+
+.react-flow__controls button {
+  background: #1f2937 !important;
+  color: #d1d5db !important;
+  border-bottom: 1px solid #374151 !important;
+  fill: #d1d5db !important;
+}
+
+.react-flow__controls button:hover {
+  background: #374151 !important;
+}
+
+.react-flow__controls button svg {
+  fill: #d1d5db !important;
+}

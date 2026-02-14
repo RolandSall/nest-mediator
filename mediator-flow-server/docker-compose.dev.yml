@@ -1,0 +1,28 @@
+# Local development: provides only PostgreSQL.
+# Run the API and UI yourself with `npm run dev:api` and `npm run dev:ui`.
+#
+# Usage:
+#   npm run dev:db          # starts the DB container
+#   npm run dev:db:down     # stops the DB container
+#   npm run dev:db:reset    # destroys data and recreates the DB
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mediatorflow
+      POSTGRES_PASSWORD: mediatorflow
+      POSTGRES_DB: mediatorflow
+    ports:
+      - '5433:5432'
+    volumes:
+      - mediatorflow-dev-data:/var/lib/postgresql/data
+      - ./src/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U mediatorflow -d mediatorflow']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  mediatorflow-dev-data:

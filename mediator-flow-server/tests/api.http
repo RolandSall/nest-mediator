@@ -1,0 +1,530 @@
+### ============================================================
+### MediatorFlow API Test Suite
+### Run requests top-to-bottom: seed first, then query
+### ============================================================
+
+@host = http://localhost:4800
+
+### ──────────────────────────────────────────────────────────────
+### 1. SEED TOPOLOGY — Register the service and its components
+### ──────────────────────────────────────────────────────────────
+POST {{host}}/collect/topology
+Content-Type: application/json
+
+{
+  "serviceName": "payment-service",
+  "instanceId": "payment-svc-01",
+  "bootedAt": "{{$isoTimestamp}}",
+  "libraryVersion": "1.0.0",
+  "commands": [
+    { "commandName": "ProcessPaymentCommand", "handlerName": "ProcessPaymentHandler" },
+    { "commandName": "CancelOrderCommand", "handlerName": "CancelOrderHandler" }
+  ],
+  "queries": [
+    { "queryName": "GetOrderStatusQuery", "handlerName": "GetOrderStatusHandler" }
+  ],
+  "events": [
+    {
+      "eventName": "PaymentProcessedEvent",
+      "aggregateType": "Order",
+      "consumers": [
+        { "consumerName": "EventStorePersistenceConsumer", "criticality": false, "order": 0, "hasCompensation": false },
+        { "consumerName": "DeductInventoryHandler", "criticality": true, "order": 1, "hasCompensation": true },
+        { "consumerName": "SendPaymentNotification", "criticality": false, "order": 2, "hasCompensation": false }
+      ]
+    },
+    {
+      "eventName": "InventoryDeductionFailedEvent",
+      "aggregateType": "Order",
+      "consumers": [
+        { "consumerName": "RefundPaymentHandler", "criticality": true, "order": 1, "hasCompensation": false },
+        { "consumerName": "RestoreInventoryHandler", "criticality": true, "order": 2, "hasCompensation": false }
+      ]
+    },
+    {
+      "eventName": "OrderCancelledEvent",
+      "aggregateType": "Order",
+      "consumers": [
+        { "consumerName": "EventStorePersistenceConsumer", "criticality": false, "order": 0, "hasCompensation": false },
+        { "consumerName": "ReleaseInventoryHandler", "criticality": true, "order": 1, "hasCompensation": true },
+        { "consumerName": "NotifyCustomerHandler", "criticality": false, "order": 2, "hasCompensation": false }
+      ]
+    }
+  ],
+  "behaviors": [
+    { "behaviorName": "ExceptionHandlingBehavior", "priority": 1, "scope": "global", "requestTypeName": null },
+    { "behaviorName": "RetryBehavior",             "priority": 2, "scope": "global", "requestTypeName": null },
+    { "behaviorName": "LoggingBehavior",            "priority": 3, "scope": "global", "requestTypeName": null },
+    { "behaviorName": "PerformanceBehavior",        "priority": 4, "scope": "global", "requestTypeName": null },
+    { "behaviorName": "ValidationBehavior",         "priority": 5, "scope": "command", "requestTypeName": "ProcessPaymentCommand" }
+  ],
+  "aggregates": [
+    { "aggregateType": "Order", "repositoryName": "OrderRepository", "eventTypes": ["PaymentProcessedEvent", "InventoryDeductionFailedEvent", "OrderCancelledEvent"] }
+  ]
+}
+
+> {%
+  client.test("Topology seeded", function() {
+    client.assert(response.status === 201, "Expected 201");
+  });
+%}
+
+### ──────────────────────────────────────────────────────────────
+### 2. SEED: Happy path trace (no errors, no compensations)
+### ──────────────────────────────────────────────────────────────
+POST {{host}}/collect/steps
+Content-Type: application/json
+
+{
+  "serviceName": "payment-service",
+  "steps": [
+    {
+      "stepId": "aa000001-0000-4000-a000-000000000001",
+      "instanceId": "payment-svc-01",
+      "type": "COMMAND_DISPATCHED",
+      "timestamp": "{{$isoTimestamp}}",
+      "correlationId": "happy-trace-0001-0000-000000000000",
+      "causationId": null,
+      "name": "ProcessPaymentCommand",
+      "payload": { "orderId": "ORD-HAPPY-001", "amount": 59.99, "currency": "USD" },
+      "metadata": { "userId": "user-1", "source": "web-checkout" }
+    },
+    {
+      "stepId": "aa000001-0000-4000-a000-000000000002",
+      "instanceId": "payment-svc-01",
+      "type": "BEHAVIOR_ENTERED",
+      "timestamp": "{{$isoTimestamp}}",
+      "correlationId": "happy-trace-0001-0000-000000000000",
+      "causationId": "aa000001-0000-4000-a000-000000000001",
+      "name": "ExceptionHandlingBehavior",
+      "durationMs": 120
+    },
+    {
+      "stepId": "aa000001-0000-4000-a000-000000000003",
+      "instanceId": "payment-svc-01",
+      "type": "BEHAVIOR_ENTERED",
+      "timestamp": "{{$isoTimestamp}}",
+      "correlationId": "happy-trace-0001-0000-000000000000",
+      "causationId": "aa000001-0000-4000-a000-000000000002",
+      "name": "LoggingBehavior",
+      "durationMs": 115
+    },
+    {
+      "stepId": "aa000001-0000-4000-a000-000000000004",
+      "instanceId": "payment-svc-01",
+      "type": "COMMAND_HANDLER_STARTED",
+      "timestamp": "{{$isoTimestamp}}",
+      "correlationId": "happy-trace-0001-0000-000000000000",
+      "causationId": "aa000001-0000-4000-a000-000000000003",
+      "name": "ProcessPaymentHandler",
+      "durationMs": 42
+    },
+    {
+      "stepId": "aa000001-0000-4000-a000-000000000005",
+      "instanceId": "payment-svc-01",
+      "type": "EVENT_PUBLISHED",
+      "timestamp": "{{$isoTimestamp}}",
+      "correlationId": "happy-trace-0001-0000-000000000000",
+      "causationId": "aa000001-0000-4000-a000-000000000004",
+      "eventId": "evt-happy-0001",
+      "name": "PaymentProcessedEvent",
+      "payload": { "orderId": "ORD-HAPPY-001", "transactionId": "txn_happy_1", "amount": 59.99 }
+    },
+    {
+      "stepId": "aa000001-0000-4000-a000-000000000006",
+      "instanceId": "payment-svc-01",
+      "type": "SYSTEM_CONSUMER_STARTED",
+      "timestamp": "{{$isoTimestamp}}",
+      "correlationId": "happy-trace-0001-0000-000000000000",
+      "causationId": "aa000001-0000-4000-a000-000000000005",
+      "eventId": "evt-happy-0001",
+      "name": "EventStorePersistenceConsumer"
+    },
+    {
+      "stepId": "aa000001-0000-4000-a000-000000000007",
+      "instanceId": "payment-svc-01",
+      "type": "SYSTEM_CONSUMER_COMPLETED",
+      "timestamp": "{{$isoTimestamp}}",
+      "correlationId": "happy-trace-0001-0000-000000000000",
+      "causationId": "aa000001-0000-4000-a000-000000000006",
+      "eventId": "evt-happy-0001",
+      "name": "EventStorePersistenceConsumer",
+      "durationMs": 3
+    },
+    {
+      "stepId": "aa000001-0000-4000-a000-000000000008",
+      "instanceId": "payment-svc-01",
+      "type": "CRITICAL_CONSUMER_STARTED",
+      "timestamp": "{{$isoTimestamp}}",
+      "correlationId": "happy-trace-0001-0000-000000000000",
+      "causationId": "aa000001-0000-4000-a000-000000000005",
+      "eventId": "evt-happy-0001",
+      "name": "DeductInventoryHandler",
+      "durationMs": 18
+    },
+    {
+      "stepId": "aa000001-0000-4000-a000-000000000009",
+      "instanceId": "payment-svc-01",
+      "type": "NONCRITICAL_CONSUMER_DISPATCHED",
+      "timestamp": "{{$isoTimestamp}}",
+      "correlationId": "happy-trace-0001-0000-000000000000",
+      "causationId": "aa000001-0000-4000-a000-000000000005",
+      "eventId": "evt-happy-0001",
+      "name": "SendPaymentNotification"
+    },
+    {
+      "stepId": "aa000001-0000-4000-a000-00000000000a",
+      "instanceId": "payment-svc-01",
+      "type": "NONCRITICAL_CONSUMER_COMPLETED",
+      "timestamp": "{{$isoTimestamp}}",
+      "correlationId": "happy-trace-0001-0000-000000000000",
+      "causationId": "aa000001-0000-4000-a000-000000000009",
+      "eventId": "evt-happy-0001",
+      "name": "SendPaymentNotification",
+      "durationMs": 8
+    }
+  ]
+}
+
+> {%
+  client.test("Happy trace seeded", function() {
+    client.assert(response.status === 201, "Expected 201");
+  });
+%}
+
+### ──────────────────────────────────────────────────────────────
+### 3. SEED: Compensation trace (failure + mixed compensations)
+###    - DeductInventoryHandler fails
+###    - RefundPaymentHandler compensation SUCCEEDS
+###    - RestoreInventoryHandler compensation FAILS
+### ──────────────────────────────────────────────────────────────
+POST {{host}}/collect/steps
+Content-Type: application/json
+
+{
+  "serviceName": "payment-service",
+  "steps": [
+    {
+      "stepId": "cc000001-0000-4000-c000-000000000001",
+      "instanceId": "payment-svc-01",
+      "type": "COMMAND_DISPATCHED",
+      "timestamp": "{{$isoTimestamp}}",
+      "correlationId": "comp-trace-0001-0000-000000000000",
+      "causationId": null,
+      "name": "ProcessPaymentCommand",
+      "payload": { "orderId": "ORD-COMP-002", "amount": 249.99, "currency": "USD", "customerId": "cust_38a7b" },
+      "metadata": { "userId": "user-42", "source": "checkout-api" }
+    },
+    {
+      "stepId": "cc000001-0000-4000-c000-000000000002",
+      "instanceId": "payment-svc-01",
+      "type": "BEHAVIOR_ENTERED",
+      "timestamp": "{{$isoTimestamp}}",
+      "correlationId": "comp-trace-0001-0000-000000000000",
+      "causationId": "cc000001-0000-4000-c000-000000000001",
+      "name": "ExceptionHandlingBehavior",
+      "durationMs": 348
+    },
+    {
+      "stepId": "cc000001-0000-4000-c000-000000000003",
+      "instanceId": "payment-svc-01",
+      "type": "BEHAVIOR_ENTERED",
+      "timestamp": "{{$isoTimestamp}}",
+      "correlationId": "comp-trace-0001-0000-000000000000",
+      "causationId": "cc000001-0000-4000-c000-000000000002",
+      "name": "RetryBehavior",
+      "durationMs": 344
+    },
+    {
+      "stepId": "cc000001-0000-4000-c000-000000000004",
+      "instanceId": "payment-svc-01",
+      "type": "BEHAVIOR_ENTERED",
+      "timestamp": "{{$isoTimestamp}}",
+      "correlationId": "comp-trace-0001-0000-000000000000",
+      "causationId": "cc000001-0000-4000-c000-000000000003",
+      "name": "LoggingBehavior",
+      "durationMs": 340
+    },
+    {
+      "stepId": "cc000001-0000-4000-c000-000000000005",
+      "instanceId": "payment-svc-01",
+      "type": "COMMAND_HANDLER_STARTED",
+      "timestamp": "{{$isoTimestamp}}",
+      "correlationId": "comp-trace-0001-0000-000000000000",
+      "causationId": "cc000001-0000-4000-c000-000000000004",
+      "name": "ProcessPaymentHandler",
+      "durationMs": 35
+    },
+    {
+      "stepId": "cc000001-0000-4000-c000-000000000006",
+      "instanceId": "payment-svc-01",
+      "type": "EVENT_PUBLISHED",
+      "timestamp": "{{$isoTimestamp}}",
+      "correlationId": "comp-trace-0001-0000-000000000000",
+      "causationId": "cc000001-0000-4000-c000-000000000005",
+      "eventId": "evt-comp-0001",
+      "name": "PaymentProcessedEvent",
+      "payload": { "orderId": "ORD-COMP-002", "transactionId": "txn_abc123", "amount": 249.99 },
+      "metadata": { "aggregateType": "Order", "aggregateId": "ORD-COMP-002" }
+    },
+    {
+      "stepId": "cc000001-0000-4000-c000-000000000007",
+      "instanceId": "payment-svc-01",
+      "type": "SYSTEM_CONSUMER_STARTED",
+      "timestamp": "{{$isoTimestamp}}",
+      "correlationId": "comp-trace-0001-0000-000000000000",
+      "causationId": "cc000001-0000-4000-c000-000000000006",
+      "eventId": "evt-comp-0001",
+      "name": "EventStorePersistenceConsumer"
+    },
+    {
+      "stepId": "cc000001-0000-4000-c000-000000000008",
+      "instanceId": "payment-svc-01",
+      "type": "SYSTEM_CONSUMER_COMPLETED",
+      "timestamp": "{{$isoTimestamp}}",
+      "correlationId": "comp-trace-0001-0000-000000000000",
+      "causationId": "cc000001-0000-4000-c000-000000000007",
+      "eventId": "evt-comp-0001",
+      "name": "EventStorePersistenceConsumer",
+      "durationMs": 4
+    },
+    {
+      "stepId": "cc000001-0000-4000-c000-000000000009",
+      "instanceId": "payment-svc-01",
+      "type": "CRITICAL_CONSUMER_STARTED",
+      "timestamp": "{{$isoTimestamp}}",
+      "correlationId": "comp-trace-0001-0000-000000000000",
+      "causationId": "cc000001-0000-4000-c000-000000000006",
+      "eventId": "evt-comp-0001",
+      "name": "DeductInventoryHandler",
+      "durationMs": 65,
+      "error": "InventoryDeductionError: Item SKU-7721 out of stock — cannot reserve 2 units"
+    },
+    {
+      "stepId": "cc000001-0000-4000-c000-00000000000a",
+      "instanceId": "payment-svc-01",
+      "type": "EVENT_PUBLISHED",
+      "timestamp": "{{$isoTimestamp}}",
+      "correlationId": "comp-trace-0001-0000-000000000000",
+      "causationId": "cc000001-0000-4000-c000-000000000009",
+      "eventId": "evt-comp-0002",
+      "name": "InventoryDeductionFailedEvent",
+      "payload": { "orderId": "ORD-COMP-002", "sku": "SKU-7721", "requestedQty": 2, "reason": "out_of_stock" },
+      "metadata": { "aggregateType": "Order", "aggregateId": "ORD-COMP-002" }
+    },
+    {
+      "stepId": "cc000001-0000-4000-c000-00000000000b",
+      "instanceId": "payment-svc-01",
+      "type": "COMPENSATION_STARTED",
+      "timestamp": "{{$isoTimestamp}}",
+      "correlationId": "comp-trace-0001-0000-000000000000",
+      "causationId": "cc000001-0000-4000-c000-00000000000a",
+      "eventId": "evt-comp-0002",
+      "name": "RefundPaymentHandler"
+    },
+    {
+      "stepId": "cc000001-0000-4000-c000-00000000000c",
+      "instanceId": "payment-svc-01",
+      "type": "COMPENSATION_COMPLETED",
+      "timestamp": "{{$isoTimestamp}}",
+      "correlationId": "comp-trace-0001-0000-000000000000",
+      "causationId": "cc000001-0000-4000-c000-00000000000b",
+      "eventId": "evt-comp-0002",
+      "name": "RefundPaymentHandler",
+      "durationMs": 35,
+      "payload": { "refundId": "ref_zz9901", "amount": 249.99 }
+    },
+    {
+      "stepId": "cc000001-0000-4000-c000-00000000000d",
+      "instanceId": "payment-svc-01",
+      "type": "COMPENSATION_STARTED",
+      "timestamp": "{{$isoTimestamp}}",
+      "correlationId": "comp-trace-0001-0000-000000000000",
+      "causationId": "cc000001-0000-4000-c000-00000000000a",
+      "eventId": "evt-comp-0002",
+      "name": "RestoreInventoryHandler"
+    },
+    {
+      "stepId": "cc000001-0000-4000-c000-00000000000e",
+      "instanceId": "payment-svc-01",
+      "type": "COMPENSATION_FAILED",
+      "timestamp": "{{$isoTimestamp}}",
+      "correlationId": "comp-trace-0001-0000-000000000000",
+      "causationId": "cc000001-0000-4000-c000-00000000000d",
+      "eventId": "evt-comp-0002",
+      "name": "RestoreInventoryHandler",
+      "durationMs": 185,
+      "error": "Database connection timeout - MANUAL INTERVENTION REQUIRED"
+    },
+    {
+      "stepId": "cc000001-0000-4000-c000-00000000000f",
+      "instanceId": "payment-svc-01",
+      "type": "COMPENSATING_EVENT_PUBLISHED",
+      "timestamp": "{{$isoTimestamp}}",
+      "correlationId": "comp-trace-0001-0000-000000000000",
+      "causationId": "cc000001-0000-4000-c000-00000000000c",
+      "eventId": "evt-comp-0003",
+      "name": "PaymentRefundedEvent",
+      "payload": { "orderId": "ORD-COMP-002", "refundId": "ref_zz9901", "amount": 249.99, "originalTransactionId": "txn_abc123" },
+      "metadata": { "aggregateType": "Order", "aggregateId": "ORD-COMP-002" }
+    }
+  ]
+}
+
+> {%
+  client.test("Compensation trace seeded", function() {
+    client.assert(response.status === 201, "Expected 201");
+  });
+%}
+
+
+### ============================================================
+### QUERY ENDPOINTS — Run after seeding above
+### ============================================================
+
+
+### ──────────────────────────────────────────────────────────────
+### 4. GET Topology — View the registered service graph
+### ──────────────────────────────────────────────────────────────
+GET {{host}}/api/topology
+
+> {%
+  client.test("Topology returned", function() {
+    client.assert(response.status === 200, "Expected 200");
+    var body = response.body;
+    client.assert(body.commands.length > 0, "Should have commands");
+    client.assert(body.events.length > 0, "Should have events");
+    client.assert(body.behaviors.length > 0, "Should have behaviors");
+  });
+%}
+
+### ──────────────────────────────────────────────────────────────
+### 5. GET Stats — Dashboard counters
+### ──────────────────────────────────────────────────────────────
+GET {{host}}/api/stats
+
+> {%
+  client.test("Stats returned", function() {
+    client.assert(response.status === 200, "Expected 200");
+  });
+%}
+
+### ──────────────────────────────────────────────────────────────
+### 6. GET All Traces — Paginated list
+### ──────────────────────────────────────────────────────────────
+GET {{host}}/api/traces?page=1&limit=50
+
+> {%
+  client.test("Traces list returned", function() {
+    client.assert(response.status === 200, "Expected 200");
+    client.assert(response.body.traces.length >= 2, "Should have at least 2 traces");
+  });
+%}
+
+### ──────────────────────────────────────────────────────────────
+### 7. GET Traces — Filter: only errors
+### ──────────────────────────────────────────────────────────────
+GET {{host}}/api/traces?hasErrors=true
+
+> {%
+  client.test("Error traces returned", function() {
+    client.assert(response.status === 200, "Expected 200");
+    client.assert(response.body.traces.length >= 1, "Should have compensation trace");
+  });
+%}
+
+### ──────────────────────────────────────────────────────────────
+### 8. GET Traces — Filter: only compensations
+### ──────────────────────────────────────────────────────────────
+GET {{host}}/api/traces?hasCompensations=true
+
+> {%
+  client.test("Compensation traces returned", function() {
+    client.assert(response.status === 200, "Expected 200");
+  });
+%}
+
+### ──────────────────────────────────────────────────────────────
+### 9. GET Happy Trace — Full step details (no errors)
+### ──────────────────────────────────────────────────────────────
+GET {{host}}/api/traces/happy-trace-0001-0000-000000000000
+
+> {%
+  client.test("Happy trace loaded", function() {
+    client.assert(response.status === 200, "Expected 200");
+    client.assert(response.body.steps.length === 10, "Should have 10 steps");
+    var errors = response.body.steps.filter(s => s.error);
+    client.assert(errors.length === 0, "No errors in happy path");
+  });
+%}
+
+### ──────────────────────────────────────────────────────────────
+### 10. GET Compensation Trace — Full step details (with failures)
+### ──────────────────────────────────────────────────────────────
+GET {{host}}/api/traces/comp-trace-0001-0000-000000000000
+
+> {%
+  client.test("Compensation trace loaded", function() {
+    client.assert(response.status === 200, "Expected 200");
+    client.assert(response.body.steps.length === 15, "Should have 15 steps");
+    var errors = response.body.steps.filter(s => s.error);
+    client.assert(errors.length === 2, "Should have 2 errors (consumer fail + compensation fail)");
+    var compensations = response.body.steps.filter(s => s.type.startsWith("COMPENSATION_"));
+    client.assert(compensations.length === 4, "Should have 4 compensation steps");
+  });
+%}
+
+### ──────────────────────────────────────────────────────────────
+### 11. SEARCH — Find steps by name
+### ──────────────────────────────────────────────────────────────
+GET {{host}}/api/search?q=RefundPayment
+
+> {%
+  client.test("Search results found", function() {
+    client.assert(response.status === 200, "Expected 200");
+  });
+%}
+
+### ──────────────────────────────────────────────────────────────
+### 12. SEARCH — Find by error keyword
+### ──────────────────────────────────────────────────────────────
+GET {{host}}/api/search?q=MANUAL+INTERVENTION
+
+> {%
+  client.test("Error search results found", function() {
+    client.assert(response.status === 200, "Expected 200");
+  });
+%}
+
+### ──────────────────────────────────────────────────────────────
+### 13. GET Aggregate Events — Order event stream
+### ──────────────────────────────────────────────────────────────
+GET {{host}}/api/aggregates/Order/ORD-COMP-002
+
+> {%
+  client.test("Aggregate events returned", function() {
+    client.assert(response.status === 200, "Expected 200");
+  });
+%}
+
+### ──────────────────────────────────────────────────────────────
+### 14. GET Stats — Filtered by service
+### ──────────────────────────────────────────────────────────────
+GET {{host}}/api/stats?service=payment-service
+
+> {%
+  client.test("Service-filtered stats", function() {
+    client.assert(response.status === 200, "Expected 200");
+  });
+%}
+
+### ──────────────────────────────────────────────────────────────
+### 15. GET Topology — Filtered by service
+### ──────────────────────────────────────────────────────────────
+GET {{host}}/api/topology?service=payment-service
+
+> {%
+  client.test("Service-filtered topology", function() {
+    client.assert(response.status === 200, "Expected 200");
+  });
+%}

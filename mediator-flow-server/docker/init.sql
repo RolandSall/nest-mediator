@@ -1,0 +1,1 @@
+-- Schema is applied by entrypoint.sh using /app/schema.sql
