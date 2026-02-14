@@ -22,5 +22,7 @@ export * from './lib/aggregate/index.js';
 // Event Store
 export * from './lib/event-store/index.js';
 
+export type { MediatorFlowExporterConfig } from './lib/mediator-flow/protocol.js';
+
 // Module
 export * from './lib/nest-mediator.module.js';

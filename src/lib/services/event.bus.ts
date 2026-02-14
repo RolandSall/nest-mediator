@@ -1,4 +1,4 @@
-import { Injectable, Logger, Type } from '@nestjs/common';
+import { Injectable, Logger, Optional, Type } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import {
   IEvent,
@@ -11,6 +11,9 @@ import {
 } from '../interfaces/index.js';
 import { mediatorContext } from '../context';
 import { v4 as uuidv4 } from 'uuid';
+import { StepEmitter } from '../mediator-flow/step-emitter.js';
+import { StepType } from '../mediator-flow/protocol.js';
+import { AggregateInfoExtractor } from '../event-store/aggregate-info.extractor.js';
 
 /**
  * Registered event consumer with its criticality metadata
@@ -47,6 +50,7 @@ interface SystemConsumer {
 export class EventBus implements IEventBus {
   private readonly logger = new Logger('EventBus');
   private readonly handlers = new Map<string, RegisteredEventConsumer[]>();
+  private readonly aggregateInfoExtractor = new AggregateInfoExtractor();
 
   /**
    * System consumers run before all user consumers.
@@ -54,7 +58,10 @@ export class EventBus implements IEventBus {
    */
   private readonly systemConsumers: SystemConsumer[] = [];
 
-  constructor(private readonly moduleRef: ModuleRef) {}
+  constructor(
+    private readonly moduleRef: ModuleRef,
+    @Optional() private readonly stepEmitter?: StepEmitter,
+  ) {}
 
   /**
    * Register a system consumer (internal use only).
@@ -73,19 +80,6 @@ export class EventBus implements IEventBus {
 
   /**
    * Publish an event to all its consumers
-   *
-   * Execution flow:
-   * 1. System consumers run first (e.g., event store persistence)
-   * 2. User critical consumers run sequentially in order (lower order first)
-   * 3. If any critical consumer fails:
-   *    - Compensations run in reverse order for previously succeeded consumers
-   *    - Compensating events returned from compensate() are published
-   *    - Non-critical consumers are NOT dispatched
-   *    - Original error is thrown after compensations complete
-   * 4. If all critical consumers succeed, non-critical consumers are fired in parallel (fire-and-forget)
-   *
-   * @param event - The event instance
-   * @returns Promise with the publish result
    */
   async publish<TEvent extends IEvent>(event: TEvent): Promise<EventPublishResult> {
     const eventId = uuidv4();
@@ -105,6 +99,17 @@ export class EventBus implements IEventBus {
           nonCriticalDispatched: 0,
           compensationsRun: 0,
         };
+      }
+
+      // Emit EVENT_PUBLISHED step with aggregate metadata
+      if (this.stepEmitter?.enabled) {
+        const aggInfo = this.aggregateInfoExtractor.extract(event);
+        this.stepEmitter.emit(StepType.EVENT_PUBLISHED, eventName, {
+          eventId,
+          metadata: aggInfo
+            ? { aggregateType: aggInfo.type, aggregateId: aggInfo.id }
+            : undefined,
+        });
       }
 
       // Separate critical and non-critical consumers
@@ -131,7 +136,18 @@ export class EventBus implements IEventBus {
         // ========================================
         for (const systemConsumer of this.systemConsumers) {
           try {
-            await systemConsumer.instance.handle(event);
+            if (this.stepEmitter?.enabled) {
+              await this.stepEmitter.wrapAsync(
+                StepType.SYSTEM_CONSUMER_STARTED,
+                StepType.SYSTEM_CONSUMER_COMPLETED,
+                StepType.SYSTEM_CONSUMER_FAILED,
+                systemConsumer.name,
+                () => systemConsumer.instance.handle(event),
+                { eventId },
+              );
+            } else {
+              await systemConsumer.instance.handle(event);
+            }
             this.logger.log(`System consumer ${systemConsumer.name} completed successfully`);
           } catch (error) {
             this.logger.error(
@@ -152,14 +168,24 @@ export class EventBus implements IEventBus {
           );
 
           try {
-            await consumer.handle(event);
+            if (this.stepEmitter?.enabled) {
+              await this.stepEmitter.wrapAsync(
+                StepType.CRITICAL_CONSUMER_STARTED,
+                StepType.CRITICAL_CONSUMER_COMPLETED,
+                StepType.CRITICAL_CONSUMER_FAILED,
+                registeredConsumer.type.name,
+                () => consumer.handle(event),
+                { eventId },
+              );
+            } else {
+              await consumer.handle(event);
+            }
             criticalSucceeded++;
             this.logger.log(
               `Critical consumer ${registeredConsumer.type.name} completed successfully`
             );
 
             // Track if it has a compensation method for potential rollback
-            // Check for applyCompensatingEvent (recommended) or compensate (deprecated)
             if (
               'applyCompensatingEvent' in consumer ||
               'compensate' in consumer
@@ -194,7 +220,12 @@ export class EventBus implements IEventBus {
         let nonCriticalDispatched = 0;
         for (const registeredConsumer of nonCriticalConsumers) {
           nonCriticalDispatched++;
-          this.executeNonCriticalConsumer(event, registeredConsumer);
+          this.stepEmitter?.emit(
+            StepType.NONCRITICAL_CONSUMER_DISPATCHED,
+            registeredConsumer.type.name,
+            { eventId },
+          );
+          this.executeNonCriticalConsumer(event, registeredConsumer, eventId);
         }
 
         return {
@@ -211,23 +242,6 @@ export class EventBus implements IEventBus {
 
   /**
    * Run compensations for succeeded consumers in reverse order.
-   * Prefers applyCompensatingEvent() (returns event) over compensate() (deprecated, returns void).
-   * Continues even if individual compensations fail (logs errors).
-   *
-   * TODO: Infinite loop detection — currently the developer is responsible for avoiding
-   * circular dispatch chains (e.g., compensation publishes event whose critical consumer
-   * fails and triggers compensation again). Potential approaches discussed:
-   * - Depth limiting: simple but arbitrary threshold, can't distinguish legitimate deep
-   *   chains from loops, and runWithNewContext() resets context so command→event→command
-   *   cycles bypass it.
-   * - Call stack tracking: track event/command types on the processing stack and flag
-   *   duplicates. More precise but risks false positives when the same event type is
-   *   legitimately dispatched for different aggregate instances.
-   * - Hybrid: stack tracking as a warning + configurable depth limit as a hard stop.
-   *
-   * @param succeededConsumers - Consumers that have compensation methods
-   * @param event - The event to pass to compensation
-   * @returns Number of compensations that were run
    */
   private async runCompensations<TEvent extends IEvent>(
     succeededConsumers: CompensatableConsumer<TEvent>[],
@@ -239,14 +253,22 @@ export class EventBus implements IEventBus {
     for (const { consumer, name } of succeededConsumers.reverse()) {
       try {
         this.logger.log(`Running compensation for ${name}...`);
+        this.stepEmitter?.emit(StepType.COMPENSATION_STARTED, name);
 
         // Prefer applyCompensatingEvent (recommended) over compensate (deprecated)
         if (consumer.applyCompensatingEvent) {
           const compensatingEvent = await consumer.applyCompensatingEvent(event);
           compensationsRun++;
 
+          this.stepEmitter?.emit(StepType.COMPENSATION_COMPLETED, name);
+
           this.logger.log(
             `Publishing compensating event: ${compensatingEvent.constructor.name} from ${name}`
+          );
+          this.stepEmitter?.emit(
+            StepType.COMPENSATING_EVENT_PUBLISHED,
+            compensatingEvent.constructor.name,
+            { metadata: { sourceName: name } },
           );
           await this.publish(compensatingEvent);
         } else if (consumer.compensate) {
@@ -257,6 +279,7 @@ export class EventBus implements IEventBus {
           );
           await consumer.compensate(event);
           compensationsRun++;
+          this.stepEmitter?.emit(StepType.COMPENSATION_COMPLETED, name);
         }
 
         this.logger.log(`Compensation for ${name} completed successfully`);
@@ -266,6 +289,9 @@ export class EventBus implements IEventBus {
           `Compensation for ${name} failed: ${(compError as Error).message}. ` +
             `Manual intervention may be required.`
         );
+        this.stepEmitter?.emit(StepType.COMPENSATION_FAILED, name, {
+          error: (compError as Error).message,
+        });
         compensationsRun++; // Count as run even if failed
       }
     }
@@ -319,12 +345,50 @@ export class EventBus implements IEventBus {
   }
 
   /**
+   * Get detailed event registrations with compensation info (for MediatorFlow topology)
+   */
+  getRegisteredEventsDetailed(): {
+    eventName: string;
+    consumers: {
+      consumerName: string;
+      criticality: string;
+      order: number;
+      hasCompensation: boolean;
+    }[];
+  }[] {
+    return Array.from(this.handlers.entries()).map(([eventName, consumers]) => ({
+      eventName,
+      consumers: consumers.map((h) => {
+        let hasCompensation = false;
+        try {
+          const instance = this.moduleRef.get(h.type, { strict: false });
+          hasCompensation =
+            'applyCompensatingEvent' in instance || 'compensate' in instance;
+        } catch {
+          // Consumer may not be instantiated yet
+        }
+        return {
+          consumerName: h.type.name,
+          criticality: h.criticality,
+          order: h.order,
+          hasCompensation,
+        };
+      }),
+    }));
+  }
+
+  /**
    * Execute a non-critical consumer in the background
    */
   private executeNonCriticalConsumer<TEvent extends IEvent>(
     event: TEvent,
-    registeredConsumer: RegisteredEventConsumer
+    registeredConsumer: RegisteredEventConsumer,
+    eventId?: string,
   ): void {
+    // Capture context before setImmediate (async context may be lost)
+    const ctx = mediatorContext.getContext();
+    const emitter = this.stepEmitter;
+
     setImmediate(async () => {
       try {
         const consumer = this.moduleRef.get<IEventConsumer<TEvent>>(
@@ -335,10 +399,21 @@ export class EventBus implements IEventBus {
         this.logger.log(
           `Non-critical consumer ${registeredConsumer.type.name} completed successfully`
         );
+        if (emitter?.enabled) {
+          emitter.emit(StepType.NONCRITICAL_CONSUMER_COMPLETED, registeredConsumer.type.name, {
+            eventId,
+          });
+        }
       } catch (error) {
         this.logger.warn(
           `Non-critical consumer ${registeredConsumer.type.name} failed: ${(error as Error).message}`
         );
+        if (emitter?.enabled) {
+          emitter.emit(StepType.NONCRITICAL_CONSUMER_FAILED, registeredConsumer.type.name, {
+            eventId,
+            error: (error as Error).message,
+          });
+        }
       }
     });
   }

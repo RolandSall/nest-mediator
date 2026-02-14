@@ -1,10 +1,12 @@
-import { Injectable, Logger, Type } from '@nestjs/common';
+import { Injectable, Logger, Optional, Type } from '@nestjs/common';
 import { ModuleRef, Reflector } from '@nestjs/core';
 import {
   IPipelineBehavior,
   PipelineBehaviorOptions,
 } from '../interfaces/pipeline-behavior.interface.js';
 import { SKIP_BEHAVIORS_METADATA } from '../decorators/skip-behavior.decorator.js';
+import { StepEmitter } from '../mediator-flow/step-emitter.js';
+import { StepType } from '../mediator-flow/protocol.js';
 
 /**
  * Registered behavior with its metadata
@@ -31,6 +33,7 @@ export class PipelineOrchestrator {
   constructor(
     private readonly moduleRef: ModuleRef,
     private readonly reflector: Reflector,
+    @Optional() private readonly stepEmitter?: StepEmitter,
   ) {}
 
   /**
@@ -99,6 +102,8 @@ export class PipelineOrchestrator {
       return handler;
     }
 
+    const emitter = this.stepEmitter;
+
     // Build the pipeline from right to left (innermost to outermost)
     return applicableBehaviors.reduceRight<() => Promise<TResponse>>(
       (next, registeredBehavior) => {
@@ -107,6 +112,15 @@ export class PipelineOrchestrator {
             IPipelineBehavior<TRequest, TResponse>
           >(registeredBehavior.type, { strict: false });
 
+          if (emitter?.enabled) {
+            return emitter.wrapAsync(
+              StepType.BEHAVIOR_ENTERED,
+              StepType.BEHAVIOR_COMPLETED,
+              StepType.BEHAVIOR_FAILED,
+              registeredBehavior.type.name,
+              () => behavior.handle(request, next),
+            );
+          }
           return behavior.handle(request, next);
         };
       },
@@ -119,5 +133,22 @@ export class PipelineOrchestrator {
    */
   getRegisteredBehaviors(): string[] {
     return this.behaviors.map((b) => b.type.name);
+  }
+
+  /**
+   * Get detailed behavior registrations (for MediatorFlow topology)
+   */
+  getRegisteredBehaviorsDetailed(): {
+    behaviorName: string;
+    priority: number;
+    scope: string;
+    requestTypeName?: string;
+  }[] {
+    return this.behaviors.map((b) => ({
+      behaviorName: b.type.name,
+      priority: b.options.priority ?? 0,
+      scope: b.options.scope ?? 'all',
+      requestTypeName: b.requestType?.name,
+    }));
   }
 }

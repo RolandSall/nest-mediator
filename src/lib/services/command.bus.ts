@@ -1,8 +1,10 @@
-import { Injectable, Type } from '@nestjs/common';
+import { Injectable, Optional, Type } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { ICommand, ICommandHandler, ICommandBus } from '../interfaces/index.js';
 import { HandlerNotFoundException } from '../exceptions/handler-not-found.exception.js';
 import { PipelineOrchestrator } from './pipeline.orchestrator.js';
+import { StepEmitter } from '../mediator-flow/step-emitter.js';
+import { StepType } from '../mediator-flow/protocol.js';
 
 /**
  * Command bus implementation.
@@ -15,6 +17,7 @@ export class CommandBus implements ICommandBus {
   constructor(
     private readonly moduleRef: ModuleRef,
     private readonly pipelineOrchestrator: PipelineOrchestrator,
+    @Optional() private readonly stepEmitter?: StepEmitter,
   ) {}
 
   /**
@@ -33,11 +36,22 @@ export class CommandBus implements ICommandBus {
       strict: false,
     });
 
+    this.stepEmitter?.emit(StepType.COMMAND_DISPATCHED, commandName);
+
     // Build and execute pipeline
     const pipeline = this.pipelineOrchestrator.buildPipeline<TCommand, void>(
       command,
       'command',
-      () => handler.execute(command)
+      () =>
+        this.stepEmitter
+          ? this.stepEmitter.wrapAsync(
+              StepType.COMMAND_HANDLER_STARTED,
+              StepType.COMMAND_HANDLER_COMPLETED,
+              StepType.COMMAND_HANDLER_FAILED,
+              handlerType.name,
+              () => handler.execute(command),
+            )
+          : handler.execute(command),
     );
 
     await pipeline();
@@ -66,5 +80,15 @@ export class CommandBus implements ICommandBus {
    */
   getRegisteredCommands(): string[] {
     return Array.from(this.handlers.keys());
+  }
+
+  /**
+   * Get detailed command registrations (for MediatorFlow topology)
+   */
+  getRegisteredCommandsDetailed(): { commandName: string; handlerName: string }[] {
+    return Array.from(this.handlers.entries()).map(([commandName, handlerType]) => ({
+      commandName,
+      handlerName: handlerType.name,
+    }));
   }
 }

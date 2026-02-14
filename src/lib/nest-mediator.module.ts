@@ -32,64 +32,130 @@ import {
   ExceptionHandlingBehavior,
   PerformanceBehavior,
 } from './behaviors/index.js';
+import { StepEmitter } from './mediator-flow/step-emitter.js';
+import { TopologyCollector } from './mediator-flow/topology-collector.js';
+import { MediatorFlowExporterConfig } from './mediator-flow/protocol.js';
 
 /**
- * Configuration options for NestMediatorModule
+ * Configuration options for {@link NestMediatorModule.forRoot}.
+ *
+ * All options are optional — calling `forRoot()` with no arguments gives you
+ * a working mediator with zero built-in behaviors. Enable what you need.
  */
 export interface NestMediatorModuleOptions {
   /**
-   * Enable built-in logging behavior.
-   * Logs request handling with timing information.
-   * Default: false
+   * Enable the built-in logging behavior.
+   * Logs every command/query dispatch with handler name and timing information.
+   * @default false
    */
   enableLogging?: boolean;
 
   /**
-   * Enable built-in validation behavior.
-   * Validates requests using class-validator if available.
-   * Default: false
+   * Enable the built-in validation behavior.
+   * Validates incoming requests using `class-validator` decorators if available.
+   * Requires `class-validator` and `class-transformer` as peer dependencies.
+   * @default false
    */
   enableValidation?: boolean;
 
   /**
-   * Enable built-in exception handling behavior.
-   * Provides centralized exception logging.
-   * Default: false
+   * Enable the built-in exception handling behavior.
+   * Wraps handler execution with centralized exception logging.
+   * Exceptions are still re-thrown after being logged.
+   * @default false
    */
   enableExceptionHandling?: boolean;
 
   /**
-   * Enable built-in performance tracking behavior.
-   * Logs warnings for slow requests.
-   * Default: false
+   * Enable the built-in performance tracking behavior.
+   * Logs warnings when request handling exceeds {@link performanceThresholdMs}.
+   * @default false
    */
   enablePerformanceTracking?: boolean;
 
   /**
    * Performance threshold in milliseconds.
-   * Requests exceeding this will be logged as warnings.
-   * Only applies when enablePerformanceTracking is true.
-   * Default: 500
+   * Requests exceeding this duration will be logged as warnings.
+   * Only applies when {@link enablePerformanceTracking} is `true`.
+   * @default 500
    */
   performanceThresholdMs?: number;
 
   /**
-   * Event store configuration for event persistence.
-   * If not provided, events are not persisted to a database.
+   * Event store configuration for persisting domain events.
+   * If not provided, events are published but not persisted to a database.
    *
-   * Supports three connection options:
-   * - Option 1: Provide `url` - library manages connection
-   * - Option 2: Provide `useExistingPool` - reuse existing connection pool
-   * - Option 3: Provide `repository` - use custom repository implementation
+   * Supports three mutually exclusive connection strategies:
+   * - **Option 1:** Provide `url` — the library creates and manages a connection pool
+   * - **Option 2:** Provide `useExistingPool` — reuse your application's existing database pool
+   * - **Option 3:** Provide `useExistingRepository` — supply a custom repository implementation
+   *
+   * @example
+   * ```typescript
+   * // Option 1: Library-managed connection
+   * eventStore: {
+   *   type: 'postgres',
+   *   url: process.env.DATABASE_URL,
+   *   mode: 'audit',
+   * }
+   *
+   * // Option 2: Reuse existing pool
+   * eventStore: {
+   *   type: 'postgres',
+   *   useExistingPool: existingPgPool,
+   *   mode: 'event-sourcing',
+   * }
+   *
+   * // Option 3: Custom repository
+   * eventStore: {
+   *   type: 'postgres',
+   *   useExistingRepository: MyCustomEventStoreRepo,
+   * }
+   * ```
    */
   eventStore?: EventStoreConfig;
+
+  /**
+   * MediatorFlow exporter configuration for real-time telemetry.
+   * When enabled, execution steps (command dispatches, handler completions,
+   * event publications, consumer outcomes, behavior execution, compensation chains)
+   * are batched and shipped to a MediatorFlow collector server.
+   *
+   * The collector server stores these steps and provides a visual dashboard
+   * for monitoring, debugging, and tracing CQRS flows.
+   *
+   * @example
+   * ```typescript
+   * mediatorFlow: {
+   *   enabled: true,
+   *   collectorUrl: 'http://localhost:4000',
+   *   serviceName: 'order-service',
+   *   batchSize: 50,           // flush every 50 steps (default)
+   *   flushIntervalMs: 2000,   // or every 2 seconds (default)
+   *   includePayloads: false,  // omit command/event payloads for privacy (default)
+   *   httpTimeoutMs: 3000,     // timeout for flush HTTP calls (default)
+   * }
+   * ```
+   */
+  mediatorFlow?: MediatorFlowExporterConfig;
 }
 
 /**
- * Token for module options injection
+ * Injection token for accessing the module options at runtime.
+ * @internal
  */
 export const NEST_MEDIATOR_OPTIONS = 'NEST_MEDIATOR_OPTIONS';
 
+/**
+ * Root module for the NestMediator CQRS library.
+ *
+ * Automatically discovers and registers all decorated handlers, behaviors,
+ * and event consumers from your application's providers at startup.
+ *
+ * Use {@link NestMediatorModule.forRoot} to configure the module.
+ * The module is registered as `global: true`, so you only need to import it
+ * once in your root `AppModule`.
+ */
 @Module({})
 export class NestMediatorModule implements OnModuleInit {
   constructor(
@@ -155,16 +221,18 @@ export class NestMediatorModule implements OnModuleInit {
       );
 
       if (behaviorMetadata) {
-        // Try to infer request type from handle method's first parameter
-        // This only works if @PipelineBehavior() decorator is applied to the handle method
+        // Try to infer request type from handle method's first parameter.
+        // This only works if the behavior's handle() method has a typed
+        // first parameter (e.g., `handle(request: CreateOrderCommand, ...)`).
         const handleParamTypes = Reflect.getMetadata(
           'design:paramtypes',
           handlerType.prototype,
           'handle'
         );
 
-        // Get the first parameter type (the request type)
-        // Only use it if it's a concrete class (not Object, Function, or undefined)
+        // Get the first parameter type (the request type).
+        // Only use it if it's a concrete class — not Object, Function, or undefined,
+        // which indicate that TypeScript erased the type to a generic.
         let requestType: Function | undefined;
         if (handleParamTypes && handleParamTypes[0]) {
           const firstParamType = handleParamTypes[0];
@@ -196,7 +264,8 @@ export class NestMediatorModule implements OnModuleInit {
       );
 
       if (eventMetadata) {
-        // Get criticality metadata (if any)
+        // Get criticality metadata (if any) — determines whether the consumer
+        // is critical (sequential + compensatable) or non-critical (parallel).
         const criticalityMetadata = this.reflector.get<EventCriticalityMetadata>(
           EVENT_CRITICALITY_METADATA,
           handlerType
@@ -219,15 +288,21 @@ export class NestMediatorModule implements OnModuleInit {
   }
 
   /**
-   * Register the NestMediator module.
-   * Handlers and behaviors are automatically discovered from the application's providers.
+   * Register the NestMediator module with optional configuration.
    *
-   * @param options - Optional configuration options
-   * @returns Dynamic module
+   * Handlers, behaviors, and event consumers are automatically discovered
+   * from the application's providers via decorator metadata — no manual
+   * registration required.
+   *
+   * The module is registered as `global: true`, so importing it once in
+   * your root `AppModule` makes {@link MediatorBus} available everywhere.
+   *
+   * @param options - Optional configuration for behaviors, event store, and telemetry
+   * @returns Dynamic module ready for NestJS to initialize
    *
    * @example
    * ```typescript
-   * // Basic setup (no built-in behaviors)
+   * // Minimal setup — just the mediator, no built-in behaviors
    * NestMediatorModule.forRoot()
    *
    * // Enable built-in behaviors
@@ -247,12 +322,43 @@ export class NestMediatorModule implements OnModuleInit {
    *     mode: 'audit',
    *   },
    * })
+   *
+   * // With MediatorFlow telemetry
+   * NestMediatorModule.forRoot({
+   *   enableLogging: true,
+   *   mediatorFlow: {
+   *     enabled: true,
+   *     collectorUrl: 'http://localhost:4000',
+   *     serviceName: 'order-service',
+   *   },
+   * })
+   *
+   * // Full configuration
+   * NestMediatorModule.forRoot({
+   *   enableLogging: true,
+   *   enableValidation: true,
+   *   enableExceptionHandling: true,
+   *   enablePerformanceTracking: true,
+   *   performanceThresholdMs: 500,
+   *   eventStore: {
+   *     type: 'postgres',
+   *     url: process.env.DATABASE_URL,
+   *     mode: 'event-sourcing',
+   *   },
+   *   mediatorFlow: {
+   *     enabled: true,
+   *     collectorUrl: process.env.MEDIATOR_FLOW_URL,
+   *     serviceName: 'order-service',
+   *     includePayloads: process.env.NODE_ENV === 'development',
+   *   },
+   * })
    * ```
    */
   static forRoot(options: NestMediatorModuleOptions = {}): DynamicModule {
     const logger = new Logger('NestMediatorModule');
     const builtInProviders: Type[] = [];
     const eventStoreProviders: Provider[] = [];
+    const mediatorFlowProviders: Provider[] = [];
 
     // Add built-in behaviors based on options
     if (options.enableExceptionHandling) {
@@ -275,7 +381,7 @@ export class NestMediatorModule implements OnModuleInit {
     if (options.eventStore) {
       const config = options.eventStore;
 
-      // Validate configuration
+      // Validate configuration — type is always required
       if (!config.type) {
         throw new Error('EventStore config.type is required');
       }
@@ -307,8 +413,26 @@ export class NestMediatorModule implements OnModuleInit {
         }
       }
 
-      // Delegate to strategies
+      // Delegate to strategy-specific provider setup
       configureEventStore(eventStoreProviders, config);
+    }
+
+    // ─── MediatorFlow telemetry ──────────────────────────────────────
+    // StepEmitter is always registered (as a no-op when disabled) so that
+    // other services can inject it without conditional logic.
+    mediatorFlowProviders.push(StepEmitter);
+
+    if (options.mediatorFlow?.enabled) {
+      mediatorFlowProviders.push({
+        provide: 'MEDIATOR_FLOW_CONFIG',
+        useFactory: (emitter: StepEmitter) => {
+          emitter.configure(options.mediatorFlow!);
+          return options.mediatorFlow!;
+        },
+        inject: [StepEmitter],
+      });
+
+      mediatorFlowProviders.push(TopologyCollector);
     }
 
     return {
@@ -323,6 +447,7 @@ export class NestMediatorModule implements OnModuleInit {
         Reflector,
         ...builtInProviders,
         ...eventStoreProviders,
+        ...mediatorFlowProviders,
         {
           provide: NEST_MEDIATOR_OPTIONS,
           useValue: options,

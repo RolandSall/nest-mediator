@@ -22,22 +22,39 @@ import {mediatorContext} from '../context/mediator-context.js';
 
 /**
  * Central mediator bus for dispatching commands, queries, and events.
- * Acts as a facade delegating to specialized buses.
+ * Acts as a facade over the specialized {@link CommandBus}, {@link QueryBus},
+ * and {@link EventBus}, routing each request through the
+ * {@link PipelineOrchestrator} before reaching its handler.
+ *
+ * Every `send` and `query` call automatically creates a new correlation
+ * context (via {@link mediatorContext}), ensuring that all downstream
+ * events share the same `correlationId` for end-to-end tracing.
+ *
+ * This is the only class consumers need to inject — handlers, behaviors,
+ * and event consumers are registered automatically by
+ * {@link NestMediatorModule.forRoot}.
  *
  * @example
  * ```typescript
- * @Controller('users')
- * export class UserController {
+ * @Controller('orders')
+ * export class OrderController {
  *   constructor(private readonly mediator: MediatorBus) {}
  *
  *   @Post()
- *   async create(@Body() dto: CreateUserDto) {
- *     await this.mediator.send(new CreateUserCommand(dto));
+ *   async create(@Body() dto: CreateOrderDto) {
+ *     // Dispatches command through pipeline → handler → events
+ *     await this.mediator.send(new PlaceOrderCommand(dto));
  *   }
  *
  *   @Get(':id')
  *   async findOne(@Param('id') id: string) {
- *     return this.mediator.query(new GetUserQuery(id));
+ *     // Dispatches query through pipeline → handler → result
+ *     return this.mediator.query(new GetOrderQuery(id));
+ *   }
+ *
+ *   @Post(':id/cancel')
+ *   async cancel(@Param('id') id: string) {
+ *     await this.mediator.send(new CancelOrderCommand(id));
  *   }
  * }
  * ```
@@ -53,9 +70,20 @@ export class MediatorBus implements IMediator {
     }
 
     /**
-     * Send a command to its handler through the pipeline.
-     * Automatically creates a new correlation context.
-     * @param command - The command instance
+     * Send a command to its registered handler through the behavior pipeline.
+     * Automatically creates a new correlation context so that all events
+     * published during handling share the same `correlationId`.
+     *
+     * Commands are fire-and-forget — they do not return a value.
+     * Use {@link query} when you need a result.
+     *
+     * @param command - The command instance to dispatch
+     * @throws Error if no handler is registered for the command
+     *
+     * @example
+     * ```typescript
+     * await mediator.send(new PlaceOrderCommand({ customerId: '123', items }));
+     * ```
      */
     async send<TCommand extends ICommand>(command: TCommand): Promise<void> {
         return mediatorContext.runWithNewContext(() => {
@@ -64,10 +92,21 @@ export class MediatorBus implements IMediator {
     }
 
     /**
-     * Execute a query through its handler and the pipeline.
+     * Execute a query through its registered handler and the behavior pipeline.
      * Automatically creates a new correlation context.
-     * @param query - The query instance
-     * @returns Promise with the result
+     *
+     * Unlike commands, queries return a result.
+     *
+     * @param query - The query instance to execute
+     * @returns Promise resolving to the handler's result
+     * @throws Error if no handler is registered for the query
+     *
+     * @example
+     * ```typescript
+     * const order = await mediator.query<GetOrderQuery, OrderDto>(
+     *   new GetOrderQuery('order-123')
+     * );
+     * ```
      */
     async query<TQuery extends IQuery, TResult = any>(
         query: TQuery
@@ -78,10 +117,27 @@ export class MediatorBus implements IMediator {
     }
 
     /**
-     * Publish an event to all its consumers.
-     * If not already in a context, creates a new one.
-     * @param event - The event instance
-     * @returns Promise with the publish result
+     * Publish an event to all its registered consumers.
+     *
+     * If called within an existing correlation context (e.g., from inside a
+     * command handler), the event inherits that context's `correlationId`.
+     * If called standalone (e.g., from a cron job), a new context is created.
+     *
+     * Critical consumers execute sequentially in order. If any fail,
+     * compensation is triggered in reverse order. Non-critical consumers
+     * execute in parallel after all critical consumers succeed.
+     *
+     * @param event - The event instance to publish
+     * @returns Promise with the publish result including consumer outcomes
+     *
+     * @example
+     * ```typescript
+     * // Inside a handler (inherits context):
+     * await this.mediator.publish(new OrderPlacedEvent(orderId));
+     *
+     * // Standalone (creates new context):
+     * await this.mediator.publish(new DailyReportEvent());
+     * ```
      */
     async publish<TEvent extends IEvent>(event: TEvent): Promise<EventPublishResult> {
         // If not already in a context (e.g., called directly), create one
@@ -94,9 +150,23 @@ export class MediatorBus implements IMediator {
     }
 
     /**
-     * Publish multiple events sequentially.
-     * All events share the same correlation context.
-     * @param events - The events to publish
+     * Publish multiple events sequentially within a shared correlation context.
+     *
+     * If called within an existing context, all events share it. If called
+     * standalone, a new context is created for the entire batch.
+     *
+     * Events are published one at a time in order — each event's consumers
+     * complete before the next event is published.
+     *
+     * @param events - Array of event instances to publish
+     *
+     * @example
+     * ```typescript
+     * await mediator.publishAll([
+     *   new OrderPlacedEvent(orderId),
+     *   new InventoryReservedEvent(orderId, items),
+     * ]);
+     * ```
      */
     async publishAll<TEvent extends IEvent>(events: TEvent[]): Promise<void> {
         const runPublish = async () => {
@@ -112,9 +182,13 @@ export class MediatorBus implements IMediator {
     }
 
     /**
-     * Register a command handler
-     * @param command - The command class
-     * @param handler - The handler class
+     * Register a command handler mapping.
+     * Called automatically by {@link NestMediatorModule} during module initialization —
+     * you do not need to call this manually.
+     *
+     * @param command - The command class (used as lookup key)
+     * @param handler - The handler class that processes this command
+     * @internal
      */
     registerCommandHandler(
         command: Type<ICommand>,
@@ -124,9 +198,13 @@ export class MediatorBus implements IMediator {
     }
 
     /**
-     * Register a query handler
-     * @param query - The query class
-     * @param handler - The handler class
+     * Register a query handler mapping.
+     * Called automatically by {@link NestMediatorModule} during module initialization —
+     * you do not need to call this manually.
+     *
+     * @param query - The query class (used as lookup key)
+     * @param handler - The handler class that processes this query
+     * @internal
      */
     registerQueryHandler(
         query: Type<IQuery>,
@@ -136,10 +214,16 @@ export class MediatorBus implements IMediator {
     }
 
     /**
-     * Register a pipeline behavior
+     * Register a pipeline behavior.
+     * Called automatically by {@link NestMediatorModule} during module initialization —
+     * you do not need to call this manually.
+     *
      * @param behaviorType - The behavior class
-     * @param options - Behavior options (priority, scope)
-     * @param requestType - Optional specific request type this behavior applies to
+     * @param options - Behavior configuration (priority determines execution order,
+     *   scope limits to 'command', 'query', or 'all')
+     * @param requestType - Optional specific request type this behavior applies to.
+     *   When set, the behavior only runs for that exact command/query class.
+     * @internal
      */
     registerPipelineBehavior(
         behaviorType: Type<IPipelineBehavior<any, any>>,
@@ -150,10 +234,16 @@ export class MediatorBus implements IMediator {
     }
 
     /**
-     * Register an event consumer
-     * @param event - The event class
+     * Register an event consumer.
+     * Called automatically by {@link NestMediatorModule} during module initialization —
+     * you do not need to call this manually.
+     *
+     * @param event - The event class this consumer listens to
      * @param handler - The consumer class
-     * @param criticalityMetadata - Criticality metadata
+     * @param criticalityMetadata - Optional criticality config. When present,
+     *   the consumer is treated as critical (sequential, awaited, with compensation).
+     *   When absent, the consumer is non-critical (parallel, fire-and-forget).
+     * @internal
      */
     registerEventHandler(
         event: Type<IEvent>,
@@ -164,28 +254,41 @@ export class MediatorBus implements IMediator {
     }
 
     /**
-     * Get registered command names (for debugging)
+     * Get the names of all registered command handlers.
+     * Useful for debugging and introspection.
+     *
+     * @returns Array of command class names (e.g., `['PlaceOrderCommand', 'CancelOrderCommand']`)
      */
     getRegisteredCommands(): string[] {
         return this.commandBus.getRegisteredCommands();
     }
 
     /**
-     * Get registered query names (for debugging)
+     * Get the names of all registered query handlers.
+     * Useful for debugging and introspection.
+     *
+     * @returns Array of query class names (e.g., `['GetOrderQuery', 'ListOrdersQuery']`)
      */
     getRegisteredQueries(): string[] {
         return this.queryBus.getRegisteredQueries();
     }
 
     /**
-     * Get registered behavior names (for debugging)
+     * Get the names of all registered pipeline behaviors.
+     * Useful for debugging and verifying the behavior pipeline.
+     *
+     * @returns Array of behavior class names in priority order
      */
     getRegisteredBehaviors(): string[] {
         return this.pipelineOrchestrator.getRegisteredBehaviors();
     }
 
     /**
-     * Get registered events and their consumers (for debugging)
+     * Get all registered events and their consumer details.
+     * Useful for debugging and verifying event wiring.
+     *
+     * @returns Array of event registrations, each with consumer name,
+     *   criticality level ('critical' or 'non-critical'), and execution order
      */
     getRegisteredEvents(): {
         event: string;

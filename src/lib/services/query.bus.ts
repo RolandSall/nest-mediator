@@ -1,8 +1,10 @@
-import { Injectable, Type } from '@nestjs/common';
+import { Injectable, Optional, Type } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { IQuery, IQueryHandler, IQueryBus } from '../interfaces/index.js';
 import { HandlerNotFoundException } from '../exceptions/handler-not-found.exception.js';
 import { PipelineOrchestrator } from './pipeline.orchestrator.js';
+import { StepEmitter } from '../mediator-flow/step-emitter.js';
+import { StepType } from '../mediator-flow/protocol.js';
 
 /**
  * Query bus implementation.
@@ -15,6 +17,7 @@ export class QueryBus implements IQueryBus {
   constructor(
     private readonly moduleRef: ModuleRef,
     private readonly pipelineOrchestrator: PipelineOrchestrator,
+    @Optional() private readonly stepEmitter?: StepEmitter,
   ) {}
 
   /**
@@ -37,11 +40,22 @@ export class QueryBus implements IQueryBus {
       { strict: false }
     );
 
+    this.stepEmitter?.emit(StepType.QUERY_DISPATCHED, queryName);
+
     // Build and execute pipeline
     const pipeline = this.pipelineOrchestrator.buildPipeline<TQuery, TResult>(
       query,
       'query',
-      () => handler.execute(query)
+      () =>
+        this.stepEmitter
+          ? this.stepEmitter.wrapAsync(
+              StepType.QUERY_HANDLER_STARTED,
+              StepType.QUERY_HANDLER_COMPLETED,
+              StepType.QUERY_HANDLER_FAILED,
+              handlerType.name,
+              () => handler.execute(query),
+            )
+          : handler.execute(query),
     );
 
     return pipeline();
@@ -68,5 +82,15 @@ export class QueryBus implements IQueryBus {
    */
   getRegisteredQueries(): string[] {
     return Array.from(this.handlers.keys());
+  }
+
+  /**
+   * Get detailed query registrations (for MediatorFlow topology)
+   */
+  getRegisteredQueriesDetailed(): { queryName: string; handlerName: string }[] {
+    return Array.from(this.handlers.entries()).map(([queryName, handlerType]) => ({
+      queryName,
+      handlerName: handlerType.name,
+    }));
   }
 }
