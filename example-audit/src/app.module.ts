@@ -56,6 +56,12 @@ const databaseUrl = process.env.DATABASE_URL;
             tableName: 'audit_events',
           }
         : undefined,
+      mediatorFlow: {
+        enabled: true,
+        collectorUrl: 'http://localhost:4800',
+        serviceName: 'example-audit',
+        includePayloads: true,
+      },
     }),
   ],
   controllers: [OrderController, InternalsController],

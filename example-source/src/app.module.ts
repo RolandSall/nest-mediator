@@ -57,6 +57,12 @@ if (!databaseUrl) {
         mode: 'source',
         tableName: 'domain_events',
       },
+      mediatorFlow: {
+        enabled: true,
+        collectorUrl: 'http://localhost:4800',
+        serviceName: 'example-source',
+        includePayloads: true,
+      },
     }),
   ],
   controllers: [OrderController, InternalsController],
