@@ -19,7 +19,7 @@
 services:
   mediatorflow:
     build: .
-    image: mediatorflow:latest
+    image: rolandsall24/mediatorflow:latest
     container_name: mediatorflow
     ports:
       - '4800:4800'
