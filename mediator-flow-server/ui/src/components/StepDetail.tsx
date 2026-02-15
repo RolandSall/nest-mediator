@@ -8,14 +8,14 @@ interface Props {
 export default function StepDetail({ step }: Props) {
   return (
     <>
-      <div className="grid grid-cols-2 gap-3 text-sm">
+      <div className="space-y-2 text-sm">
         <div>
           <span className="text-gray-500">Name:</span>{' '}
-          <span className="text-gray-300">{step.name}</span>
+          <span className="text-gray-300 break-all">{step.name}</span>
         </div>
         <div>
           <span className="text-gray-500">Type:</span>{' '}
-          <span className="text-gray-300">{step.type}</span>
+          <span className="text-gray-300 break-all">{step.type}</span>
         </div>
         <div>
           <span className="text-gray-500">Duration:</span>{' '}

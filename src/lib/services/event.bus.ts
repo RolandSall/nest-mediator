@@ -85,6 +85,9 @@ export class EventBus implements IEventBus {
     const eventId = uuidv4();
     const eventName = event.constructor.name;
 
+    // Capture which handler is publishing this event (if any)
+    const publishedBy = mediatorContext.getContext().currentHandlerName;
+
     // Run within causation context
     return mediatorContext.runWithCausation(eventId, async () => {
       const consumers = this.handlers.get(eventName) || [];
@@ -106,9 +109,10 @@ export class EventBus implements IEventBus {
         const aggInfo = this.aggregateInfoExtractor.extract(event);
         this.stepEmitter.emit(StepType.EVENT_PUBLISHED, eventName, {
           eventId,
-          metadata: aggInfo
-            ? { aggregateType: aggInfo.type, aggregateId: aggInfo.id }
-            : undefined,
+          metadata: {
+            ...(aggInfo ? { aggregateType: aggInfo.type, aggregateId: aggInfo.id } : {}),
+            ...(publishedBy ? { publishedBy } : {}),
+          },
         });
       }
 
@@ -136,6 +140,7 @@ export class EventBus implements IEventBus {
         // ========================================
         for (const systemConsumer of this.systemConsumers) {
           try {
+            mediatorContext.getContext().currentHandlerName = systemConsumer.name;
             if (this.stepEmitter?.enabled) {
               await this.stepEmitter.wrapAsync(
                 StepType.SYSTEM_CONSUMER_STARTED,
@@ -168,6 +173,7 @@ export class EventBus implements IEventBus {
           );
 
           try {
+            mediatorContext.getContext().currentHandlerName = registeredConsumer.type.name;
             if (this.stepEmitter?.enabled) {
               await this.stepEmitter.wrapAsync(
                 StepType.CRITICAL_CONSUMER_STARTED,
@@ -220,6 +226,7 @@ export class EventBus implements IEventBus {
         let nonCriticalDispatched = 0;
         for (const registeredConsumer of nonCriticalConsumers) {
           nonCriticalDispatched++;
+          mediatorContext.getContext().currentHandlerName = registeredConsumer.type.name;
           this.stepEmitter?.emit(
             StepType.NONCRITICAL_CONSUMER_DISPATCHED,
             registeredConsumer.type.name,

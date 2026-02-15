@@ -852,7 +852,13 @@ React Dashboard (topology graph, trace list, execution flow, stats)
 
 ### Quick Start — Docker (Recommended)
 
-One command to get the full stack (PostgreSQL + API + Dashboard) running:
+**Option A: Pull from DockerHub** (fastest)
+
+```bash
+docker run -d -p 4800:4800 --name mediatorflow rolandsall24/mediatorflow:latest
+```
+
+**Option B: Build locally**
 
 ```bash
 cd mediator-flow-server
@@ -864,6 +870,8 @@ Open [http://localhost:4800](http://localhost:4800) to see the dashboard.
 To stop:
 ```bash
 npm run docker:down
+# or if using Option A:
+docker rm -f mediatorflow
 ```
 
 ### Quick Start — Local Development
@@ -947,11 +955,31 @@ Each step carries the `correlationId` and `causationId` from `AsyncLocalStorage`
 By default, Docker mode runs PostgreSQL inside the container. To use an external database (e.g., AWS RDS):
 
 ```bash
+docker run -d -p 4800:4800 \
+  -e DATABASE_URL=postgres://user:pass@your-rds.amazonaws.com:5432/mediatorflow \
+  rolandsall24/mediatorflow:latest
+```
+
+Or with docker compose:
+
+```bash
 DATABASE_URL=postgres://user:pass@your-rds.amazonaws.com:5432/mediatorflow \
   docker compose up -d
 ```
 
 The embedded PostgreSQL is automatically skipped when `DATABASE_URL` points to a non-localhost host. Schema migrations run against the external database.
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DATABASE_URL` | External PostgreSQL connection string (skips embedded DB) | — |
+| `PORT` | API port | `4800` |
+| `POSTGRES_USER` | Embedded DB username | `mediatorflow` |
+| `POSTGRES_PASSWORD` | Embedded DB password | `mediatorflow` |
+| `POSTGRES_DB` | Embedded DB name | `mediatorflow` |
+
+For full documentation, see the [DockerHub page](https://hub.docker.com/r/rolandsall24/mediatorflow).
 
 ### Zero Overhead When Disabled
 

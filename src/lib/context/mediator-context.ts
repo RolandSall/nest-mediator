@@ -23,6 +23,13 @@ export interface MediatorContextData {
    * and by child events as their causation_id (parent→child link).
    */
   currentEventId?: string;
+
+  /**
+   * The name of the handler currently executing.
+   * Set before a command/event handler runs so that child events
+   * can record which handler published them (publishedBy metadata).
+   */
+  currentHandlerName?: string;
 }
 
 /**

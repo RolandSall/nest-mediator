@@ -5,6 +5,7 @@ import { HandlerNotFoundException } from '../exceptions/handler-not-found.except
 import { PipelineOrchestrator } from './pipeline.orchestrator.js';
 import { StepEmitter } from '../mediator-flow/step-emitter.js';
 import { StepType } from '../mediator-flow/protocol.js';
+import { mediatorContext } from '../context';
 
 /**
  * Command bus implementation.
@@ -49,9 +50,15 @@ export class CommandBus implements ICommandBus {
               StepType.COMMAND_HANDLER_COMPLETED,
               StepType.COMMAND_HANDLER_FAILED,
               handlerType.name,
-              () => handler.execute(command),
+              () => {
+                mediatorContext.getContext().currentHandlerName = handlerType.name;
+                return handler.execute(command);
+              },
             )
-          : handler.execute(command),
+          : (() => {
+              mediatorContext.getContext().currentHandlerName = handlerType.name;
+              return handler.execute(command);
+            })(),
     );
 
     await pipeline();

@@ -151,29 +151,64 @@ function estimateWidth(text: string): number {
   return Math.max(160, Math.min(280, text.length * 7 + 32));
 }
 
-function buildExecutionGraph(steps: Step[], hiddenCategories: Set<string>) {
-  const visibleSteps = steps.filter((s) => !hiddenCategories.has(getStepCategory(s)));
-  if (visibleSteps.length === 0) return { nodes: [], edges: [] };
+function itemColors(item: CompactItem): { bg: string; border: string; text: string } {
+  const base = categoryColors[item.category];
+  return item.error ? { ...base, border: '#ef4444' } : base;
+}
 
-  const stepIdSet = new Set(visibleSteps.map((s) => s.stepId));
-  const eventIdToStepId = new Map<string, string>();
-  visibleSteps.forEach((s) => { if (s.eventId) eventIdToStepId.set(s.eventId, s.stepId); });
+function buildExecutionGraph(steps: Step[], hiddenCategories: Set<string>) {
+  // Build compact items — each merges STARTED+COMPLETED into a single node
+  const items = buildCompactList(steps, hiddenCategories);
+  if (items.length === 0) return { nodes: [], edges: [] };
+
+  const itemIdSet = new Set(items.map((it) => it.id));
+
+  // Primary step = first step in the group (the STARTED/ENTERED/DISPATCHED/PUBLISHED one)
+  const primaryStep = (item: CompactItem) => item.steps[0];
+
+  // Map eventId → item id for EVENT_PUBLISHED items
+  const eventPublishedMap = new Map<string, string>();
+  items.forEach((it) => {
+    const s = primaryStep(it);
+    if (s.eventId && s.type === 'EVENT_PUBLISHED') eventPublishedMap.set(s.eventId, it.id);
+  });
+
+  // Map (eventId:name) → item id for consumer/handler items (event-scoped)
+  const startedItemMap = new Map<string, string>();
+  items.forEach((it) => {
+    const s = primaryStep(it);
+    if (s.eventId && (s.type.endsWith('_STARTED') || s.type === 'NONCRITICAL_CONSUMER_DISPATCHED')) {
+      startedItemMap.set(`${s.eventId}:${s.name}`, it.id);
+    }
+  });
+
+  // Map name → item id for behaviors/handlers without eventId
+  const enteredItemMap = new Map<string, string>();
+  items.forEach((it) => {
+    const s = primaryStep(it);
+    if (!s.eventId && (s.type === 'BEHAVIOR_ENTERED' || s.type === 'COMMAND_HANDLER_STARTED' || s.type === 'QUERY_HANDLER_STARTED')) {
+      enteredItemMap.set(s.name, it.id);
+    }
+  });
 
   const nodes: Node[] = [];
   const edges: Edge[] = [];
 
-  visibleSteps.forEach((step) => {
-    const colors = nodeColors(step);
-    const category = getStepCategory(step);
-    const isNonCritical = category === 'noncritical_consumer';
-    const w = estimateWidth(step.name);
+  // Create one node per compact item
+  items.forEach((item) => {
+    const colors = itemColors(item);
+    const isNonCritical = item.category === 'noncritical_consumer';
+    const label = item.durationMs != null
+      ? `${item.name}\n${formatDuration(item.durationMs)}`
+      : item.name;
+    const w = estimateWidth(item.name);
 
     nodes.push({
-      id: step.stepId,
+      id: item.id,
       type: 'resizable',
       data: {
-        label: `${step.name}\n${step.type}`,
-        width: w, height: 50, step, category,
+        label,
+        width: w, height: 50, step: primaryStep(item), category: item.category,
         bg: colors.bg, color: colors.text,
         border: `${isNonCritical ? '2px dashed' : '1px solid'} ${colors.border}`,
         borderColor: colors.border, borderRadius: 8,
@@ -185,27 +220,54 @@ function buildExecutionGraph(steps: Step[], hiddenCategories: Set<string>) {
     });
   });
 
-  visibleSteps.forEach((step, i) => {
-    if (step.causationId) {
-      let parentId: string | undefined;
-      if (stepIdSet.has(step.causationId)) parentId = step.causationId;
-      else parentId = eventIdToStepId.get(step.causationId);
-      if (parentId) {
-        const isNonCritical = getStepCategory(step) === 'noncritical_consumer';
-        edges.push({
-          id: `e-${parentId}-${step.stepId}`, source: parentId, target: step.stepId,
-          style: isNonCritical ? { strokeDasharray: '5,5' } : undefined,
-          label: isNonCritical ? '||' : undefined,
-          labelStyle: isNonCritical ? { fill: '#9ca3af', fontSize: 10 } : undefined,
-        });
+  // Build edges between compact items
+  items.forEach((item, i) => {
+    const step = primaryStep(item);
+    const isNonCritical = item.category === 'noncritical_consumer';
+    const edgeStyle = isNonCritical ? { strokeDasharray: '5,5' } : undefined;
+    const edgeLabel = isNonCritical ? '||' : undefined;
+    const edgeLabelStyle = isNonCritical ? { fill: '#9ca3af', fontSize: 10 } : undefined;
+
+    // 1. EVENT_PUBLISHED with publishedBy → link to the handler that published it
+    if (step.type === 'EVENT_PUBLISHED' && step.metadata?.publishedBy) {
+      const publishedBy = step.metadata.publishedBy as string;
+      // Try event-scoped lookup (handler within an event consumer context)
+      if (step.causationId) {
+        const handlerId = startedItemMap.get(`${step.causationId}:${publishedBy}`);
+        if (handlerId && itemIdSet.has(handlerId)) {
+          edges.push({ id: `e-${handlerId}-${item.id}`, source: handlerId, target: item.id, style: edgeStyle, label: edgeLabel, labelStyle: edgeLabelStyle });
+          return;
+        }
+      }
+      // Try name-only lookup (root-level command/query handler)
+      const enteredId = enteredItemMap.get(publishedBy);
+      if (enteredId && itemIdSet.has(enteredId)) {
+        edges.push({ id: `e-${enteredId}-${item.id}`, source: enteredId, target: item.id, style: edgeStyle, label: edgeLabel, labelStyle: edgeLabelStyle });
         return;
       }
     }
+
+    // 2. Consumer/handler STARTED → link to EVENT_PUBLISHED with same eventId
+    if (step.eventId && (step.type.endsWith('_STARTED') || step.type === 'NONCRITICAL_CONSUMER_DISPATCHED')) {
+      const pubId = eventPublishedMap.get(step.eventId);
+      if (pubId && pubId !== item.id && itemIdSet.has(pubId)) {
+        edges.push({ id: `e-${pubId}-${item.id}`, source: pubId, target: item.id, style: edgeStyle, label: edgeLabel, labelStyle: edgeLabelStyle });
+        return;
+      }
+    }
+
+    // 3. Cross-event causation fallback → link to parent EVENT_PUBLISHED
+    if (step.causationId) {
+      const parentId = eventPublishedMap.get(step.causationId);
+      if (parentId && itemIdSet.has(parentId)) {
+        edges.push({ id: `e-${parentId}-${item.id}`, source: parentId, target: item.id, style: edgeStyle, label: edgeLabel, labelStyle: edgeLabelStyle });
+        return;
+      }
+    }
+
+    // 4. Fallback: sequential link to previous item
     if (i > 0) {
-      edges.push({
-        id: `e-${visibleSteps[i - 1].stepId}-${step.stepId}`,
-        source: visibleSteps[i - 1].stepId, target: step.stepId,
-      });
+      edges.push({ id: `e-${items[i - 1].id}-${item.id}`, source: items[i - 1].id, target: item.id });
     }
   });
 

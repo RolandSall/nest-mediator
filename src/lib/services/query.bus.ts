@@ -5,6 +5,7 @@ import { HandlerNotFoundException } from '../exceptions/handler-not-found.except
 import { PipelineOrchestrator } from './pipeline.orchestrator.js';
 import { StepEmitter } from '../mediator-flow/step-emitter.js';
 import { StepType } from '../mediator-flow/protocol.js';
+import { mediatorContext } from '../context';
 
 /**
  * Query bus implementation.
@@ -53,9 +54,15 @@ export class QueryBus implements IQueryBus {
               StepType.QUERY_HANDLER_COMPLETED,
               StepType.QUERY_HANDLER_FAILED,
               handlerType.name,
-              () => handler.execute(query),
+              () => {
+                mediatorContext.getContext().currentHandlerName = handlerType.name;
+                return handler.execute(query);
+              },
             )
-          : handler.execute(query),
+          : (() => {
+              mediatorContext.getContext().currentHandlerName = handlerType.name;
+              return handler.execute(query);
+            })(),
     );
 
     return pipeline();

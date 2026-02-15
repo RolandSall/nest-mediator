@@ -34,3 +34,6 @@ ENHANCEMENT_PLAN.md
 example/
 example-audit/
 example-source/
+
+# MediatorFlow server (not part of npm package)
+mediator-flow-server/
