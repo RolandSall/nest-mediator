@@ -3,10 +3,12 @@ import Dashboard from './views/Dashboard/Dashboard';
 import TopologyView from './views/TopologyView/TopologyView';
 import TraceList from './views/TraceList/TraceList';
 import ExecutionView from './views/ExecutionView/ExecutionView';
+import ArchitectView from './views/ArchitectView/ArchitectView';
 const navItems = [
   { to: '/', label: 'Dashboard' },
   { to: '/topology', label: 'Topology' },
   { to: '/traces', label: 'Traces' },
+  { to: '/architect', label: 'Architect' },
 ];
 
 export default function App() {
@@ -35,7 +37,7 @@ export default function App() {
           <Route path="/topology" element={<TopologyView />} />
           <Route path="/traces" element={<TraceList />} />
           <Route path="/traces/:correlationId" element={<ExecutionView />} />
-
+          <Route path="/architect" element={<ArchitectView />} />
         </Routes>
       </main>
     </div>

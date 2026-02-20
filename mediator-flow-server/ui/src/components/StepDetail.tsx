@@ -6,6 +6,10 @@ interface Props {
 }
 
 export default function StepDetail({ step }: Props) {
+  const isEventStep = step.type === 'EVENT_PUBLISHED' || step.type === 'COMPENSATING_EVENT_PUBLISHED';
+  const isConsumerStep = step.type.startsWith('CRITICAL_CONSUMER_') ||
+    step.type.startsWith('SYSTEM_CONSUMER_') || step.type.startsWith('NONCRITICAL_CONSUMER_');
+
   return (
     <>
       <div className="space-y-2 text-sm">
@@ -17,18 +21,30 @@ export default function StepDetail({ step }: Props) {
           <span className="text-gray-500">Type:</span>{' '}
           <span className="text-gray-300 break-all">{step.type}</span>
         </div>
-        <div>
-          <span className="text-gray-500">Duration:</span>{' '}
-          <span className="text-gray-300">{formatDuration(step.durationMs)}</span>
-        </div>
-        <div>
-          <span className="text-gray-500">Event ID:</span>{' '}
-          <span className="text-gray-300 font-mono text-xs break-all">{step.eventId ?? '-'}</span>
-        </div>
-        <div>
-          <span className="text-gray-500">Causation ID:</span>{' '}
-          <span className="text-gray-300 font-mono text-xs break-all">{step.causationId ?? '-'}</span>
-        </div>
+        {!isEventStep && (
+          <div>
+            <span className="text-gray-500">Duration:</span>{' '}
+            <span className="text-gray-300">{formatDuration(step.durationMs)}</span>
+          </div>
+        )}
+        {isEventStep && step.eventId && (
+          <div>
+            <span className="text-gray-500">Event ID:</span>{' '}
+            <span className="text-gray-300 font-mono text-xs break-all">{step.eventId}</span>
+          </div>
+        )}
+        {isConsumerStep && step.eventId && (
+          <div>
+            <span className="text-gray-500">Handling Event:</span>{' '}
+            <span className="text-gray-300 font-mono text-xs break-all">{step.eventId}</span>
+          </div>
+        )}
+        {isEventStep && step.causationId && (
+          <div>
+            <span className="text-gray-500">Caused By Event:</span>{' '}
+            <span className="text-gray-300 font-mono text-xs break-all">{step.causationId}</span>
+          </div>
+        )}
         <div>
           <span className="text-gray-500">Timestamp:</span>{' '}
           <span className="text-gray-300">{formatTime(step.timestamp)}</span>

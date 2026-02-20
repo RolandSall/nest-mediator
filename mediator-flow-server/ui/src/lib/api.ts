@@ -1,9 +1,36 @@
+import type { Diagram, DiagramSummary, DiagramGraph, ValidationResult, GenerationResult } from '../diagram';
+
 const BASE = '';
 
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(`${BASE}${url}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
+}
+
+async function postJson<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${url}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+async function putJson<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${url}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+async function del(url: string): Promise<void> {
+  const res = await fetch(`${BASE}${url}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
 }
 
 export interface TraceSummary {
@@ -128,5 +155,37 @@ export const api = {
     const params = new URLSearchParams({ q });
     if (type) params.set('type', type);
     return fetchJson<any[]>(`/api/search?${params}`);
+  },
+
+  // ── Diagrams ──
+
+  getDiagrams: () => fetchJson<DiagramSummary[]>('/api/diagrams'),
+
+  getDiagram: (id: string) => fetchJson<Diagram>(`/api/diagrams/${id}`),
+
+  createDiagram: (data: { name: string; description?: string; graph: DiagramGraph }) =>
+    postJson<Diagram>('/api/diagrams', data),
+
+  updateDiagram: (id: string, data: { name?: string; description?: string; graph?: DiagramGraph }) =>
+    putJson<Diagram>(`/api/diagrams/${id}`, data),
+
+  deleteDiagram: (id: string) => del(`/api/diagrams/${id}`),
+
+  importTopology: (service?: string) =>
+    fetchJson<DiagramGraph>(`/api/diagrams/import-topology${service ? `?service=${service}` : ''}`),
+
+  // ── Code generation ──
+
+  generate: (body: { diagramId: string } | { graph: DiagramGraph }) =>
+    postJson<{ validation: ValidationResult; result?: GenerationResult }>('/api/generate', body),
+
+  downloadZip: async (body: { diagramId: string } | { graph: DiagramGraph }): Promise<Blob> => {
+    const res = await fetch(`${BASE}/api/generate/download`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.blob();
   },
 };

@@ -13,7 +13,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { api, Topology } from '../../lib/api';
-import { layoutGraph } from '../../lib/layout';
+import { layoutGraph } from '../../diagram';
 import { useUIStore } from '../../stores/uiStore';
 import ResizableNode from '../../components/ResizableNode';
 import CategoryLegend, { type LegendItem } from '../../components/CategoryLegend';

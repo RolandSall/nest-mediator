@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.74.0",
     "@tanstack/react-query": "^5.60.0",
     "@xyflow/react": "^12.4.0",
     "dagre": "^0.8.5",
