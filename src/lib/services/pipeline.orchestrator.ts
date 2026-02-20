@@ -112,16 +112,28 @@ export class PipelineOrchestrator {
             IPipelineBehavior<TRequest, TResponse>
           >(registeredBehavior.type, { strict: false });
 
+          // Wrap next() to detect retries (behavior calling next() more than once)
+          let callCount = 0;
+          const trackedNext = async () => {
+            callCount++;
+            if (callCount > 1 && emitter?.enabled) {
+              emitter.emit(StepType.RETRY_ATTEMPTED, registeredBehavior.type.name, {
+                metadata: { attempt: callCount, retriedBy: registeredBehavior.type.name },
+              });
+            }
+            return next();
+          };
+
           if (emitter?.enabled) {
             return emitter.wrapAsync(
               StepType.BEHAVIOR_ENTERED,
               StepType.BEHAVIOR_COMPLETED,
               StepType.BEHAVIOR_FAILED,
               registeredBehavior.type.name,
-              () => behavior.handle(request, next),
+              () => behavior.handle(request, trackedNext),
             );
           }
-          return behavior.handle(request, next);
+          return behavior.handle(request, trackedNext);
         };
       },
       handler

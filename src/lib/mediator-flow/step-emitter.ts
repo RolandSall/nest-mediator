@@ -35,13 +35,16 @@ export class StepEmitter implements OnModuleDestroy {
 
     const ctx = mediatorContext.getContext();
 
+    // Only event-to-event steps carry causationId (parent event that caused this event)
+    const isEventStep = type === StepType.EVENT_PUBLISHED || type === StepType.COMPENSATING_EVENT_PUBLISHED;
+
     const step: ExecutionStep = {
       stepId: uuidv4(),
       instanceId: this.instanceId,
       type,
       timestamp: new Date().toISOString(),
       correlationId: ctx.correlationId,
-      causationId: ctx.causationId,
+      causationId: isEventStep ? ctx.causationId : undefined,
       eventId: extra?.eventId,
       durationMs: extra?.durationMs,
       name,

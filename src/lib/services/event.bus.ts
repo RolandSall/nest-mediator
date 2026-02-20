@@ -81,7 +81,10 @@ export class EventBus implements IEventBus {
   /**
    * Publish an event to all its consumers
    */
-  async publish<TEvent extends IEvent>(event: TEvent): Promise<EventPublishResult> {
+  async publish<TEvent extends IEvent>(
+    event: TEvent,
+    options?: { isCompensation?: boolean },
+  ): Promise<EventPublishResult> {
     const eventId = uuidv4();
     const eventName = event.constructor.name;
 
@@ -104,15 +107,14 @@ export class EventBus implements IEventBus {
         };
       }
 
-      // Emit EVENT_PUBLISHED step with aggregate metadata
+      // Emit step: COMPENSATING_EVENT_PUBLISHED for compensation events, EVENT_PUBLISHED otherwise
       if (this.stepEmitter?.enabled) {
-        const aggInfo = this.aggregateInfoExtractor.extract(event);
-        this.stepEmitter.emit(StepType.EVENT_PUBLISHED, eventName, {
+        const stepType = options?.isCompensation
+          ? StepType.COMPENSATING_EVENT_PUBLISHED
+          : StepType.EVENT_PUBLISHED;
+        this.stepEmitter.emit(stepType, eventName, {
           eventId,
-          metadata: {
-            ...(aggInfo ? { aggregateType: aggInfo.type, aggregateId: aggInfo.id } : {}),
-            ...(publishedBy ? { publishedBy } : {}),
-          },
+          metadata: this.buildEventMetadata(event, publishedBy),
         });
       }
 
@@ -181,7 +183,7 @@ export class EventBus implements IEventBus {
                 StepType.CRITICAL_CONSUMER_FAILED,
                 registeredConsumer.type.name,
                 () => consumer.handle(event),
-                { eventId },
+                { eventId, metadata: { order: registeredConsumer.order } },
               );
             } else {
               await consumer.handle(event);
@@ -272,12 +274,10 @@ export class EventBus implements IEventBus {
           this.logger.log(
             `Publishing compensating event: ${compensatingEvent.constructor.name} from ${name}`
           );
-          this.stepEmitter?.emit(
-            StepType.COMPENSATING_EVENT_PUBLISHED,
-            compensatingEvent.constructor.name,
-            { metadata: { sourceName: name } },
-          );
-          await this.publish(compensatingEvent);
+
+          // Set handler name so the recursive publish() captures correct publishedBy
+          mediatorContext.getContext().currentHandlerName = name;
+          await this.publish(compensatingEvent, { isCompensation: true });
         } else if (consumer.compensate) {
           // Deprecated path
           this.logger.warn(
@@ -299,7 +299,7 @@ export class EventBus implements IEventBus {
         this.stepEmitter?.emit(StepType.COMPENSATION_FAILED, name, {
           error: (compError as Error).message,
         });
-        compensationsRun++; // Count as run even if failed
+        compensationsRun++;
       }
     }
 
@@ -382,6 +382,25 @@ export class EventBus implements IEventBus {
         };
       }),
     }));
+  }
+
+  /**
+   * Build metadata for EVENT_PUBLISHED / COMPENSATING_EVENT_PUBLISHED steps.
+   */
+  private buildEventMetadata(
+    event: IEvent,
+    publishedBy?: string,
+  ): Record<string, unknown> {
+    const metadata: Record<string, unknown> = {};
+    const aggInfo = this.aggregateInfoExtractor.extract(event);
+    if (aggInfo) {
+      metadata.aggregateType = aggInfo.type;
+      metadata.aggregateId = aggInfo.id;
+    }
+    if (publishedBy) {
+      metadata.publishedBy = publishedBy;
+    }
+    return metadata;
   }
 
   /**
