@@ -16,6 +16,15 @@ A lightweight CQRS mediator for NestJS — start simple, add event persistence w
 - **MediatorFlow Dashboard** — Real-time visual monitoring, topology graphs, execution tracing
 - **Zero config** — Decorator-based auto-discovery, built on NestJS DI
 
+### Topology View
+![Topology View](images/topology-view.png)
+
+### Execution Trace — Flow
+![Execution Trace Flow](images/execution-trace-flow.png)
+
+### Execution Trace — Sequence
+![Execution Trace Sequence](images/execution-trace-sequence.png)
+
 ## Installation
 
 ```bash
