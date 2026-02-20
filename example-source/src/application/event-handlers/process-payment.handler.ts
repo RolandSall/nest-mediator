@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EventHandler, ICriticalEventConsumer, IEvent, MediatorBus, Critical } from '@rolandsall24/nest-mediator';
 import { OrderPlacedEvent, PaymentChargedEvent, PaymentRefundedEvent } from '../../domain/events';
+import { ChaosService } from '../chaos/chaos.service';
+import { SimulatedFailureError } from '../../domain/exceptions';
 
 @Injectable()
 @EventHandler(OrderPlacedEvent)
@@ -8,9 +10,17 @@ import { OrderPlacedEvent, PaymentChargedEvent, PaymentRefundedEvent } from '../
 export class ProcessPaymentHandler implements ICriticalEventConsumer<OrderPlacedEvent> {
   private readonly logger = new Logger(ProcessPaymentHandler.name);
 
-  constructor(private readonly mediatorBus: MediatorBus) {}
+  constructor(
+    private readonly mediatorBus: MediatorBus,
+    private readonly chaosService: ChaosService,
+  ) {}
 
   async handle(event: OrderPlacedEvent): Promise<void> {
+    if (this.chaosService.shouldFail('payment')) {
+      this.logger.error(`[Payment] SIMULATED FAILURE for order ${event.orderId}`);
+      throw new SimulatedFailureError('payment');
+    }
+
     this.logger.log(`[Payment] Charged $${event.total} for order ${event.orderId}`);
 
     await this.mediatorBus.publish(

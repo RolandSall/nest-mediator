@@ -24,6 +24,7 @@ import {
   RetryBehavior,
 } from './application/behaviors';
 import { OrderAggregateRepository } from './infrastructure/persistence/order';
+import { ChaosService } from './application/chaos/chaos.service';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -67,6 +68,9 @@ if (!databaseUrl) {
   ],
   controllers: [OrderController, InternalsController],
   providers: [
+    // Chaos testing (compensation simulation)
+    ChaosService,
+
     // Aggregate repository (zero-boilerplate via @ForAggregate)
     OrderAggregateRepository,
 

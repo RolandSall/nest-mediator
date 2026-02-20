@@ -6,12 +6,14 @@ import {
   GetOrderQuery,
 } from '../../application/order';
 import { CreateOrderApiRequest, CancelOrderApiRequest } from './create-order-api.request';
+import { ChaosService, FailAtStep } from '../../application/chaos/chaos.service';
 
 @Controller()
 export class OrderController {
   constructor(
     private readonly mediator: MediatorBus,
     @Inject(EVENT_STORE_REPOSITORY) private readonly eventStore: IEventStoreRepository,
+    private readonly chaosService: ChaosService,
   ) {}
 
   @Get()
@@ -115,6 +117,63 @@ export class OrderController {
         'Both cancel commands loaded the aggregate at the same version. ' +
         'The first to persist wins; the second gets ConcurrencyError ' +
         'because the version has advanced.',
+    };
+  }
+
+  /**
+   * Demonstrates saga compensation.
+   * Places an order, but forces a failure at the specified step.
+   * If failAt is "payment", inventory is reserved successfully (order 1),
+   * then payment throws, triggering compensation (InventoryReleasedEvent).
+   * If failAt is "inventory", the first critical consumer throws immediately
+   * with nothing to compensate.
+   */
+  @Post('orders/test-compensation')
+  async testCompensation(@Body() body: { failAt: 'inventory' | 'payment' }) {
+    if (!this.eventStore) {
+      return { error: 'Event store not configured. Set DATABASE_URL to test compensation.' };
+    }
+
+    const failAt: FailAtStep = body.failAt;
+    if (!failAt || !['inventory', 'payment'].includes(failAt)) {
+      return { error: 'Body must include failAt: "inventory" | "payment"' };
+    }
+
+    const orderId = `order-compensation-${Date.now()}`;
+    this.chaosService.failAtStep = failAt;
+
+    let sagaError: Error | null = null;
+    try {
+      await this.mediator.send(
+        new PlaceOrderCommand('compensation-test-customer', [{ productId: 'widget', quantity: 3 }], 49.99, orderId),
+      );
+    } catch (err) {
+      sagaError = err as Error;
+    } finally {
+      this.chaosService.failAtStep = null;
+    }
+
+    // Fetch persisted domain events for this aggregate
+    const events = await this.eventStore.getEventsForAggregate('Order', orderId);
+
+    return {
+      orderId,
+      failAt,
+      sagaError: sagaError ? { name: sagaError.name, message: sagaError.message } : null,
+      events: events.map((e) => ({
+        eventType: e.eventType,
+        sequenceNumber: e.sequenceNumber,
+        occurredAt: e.occurredAt,
+      })),
+      explanation:
+        failAt === 'payment'
+          ? 'ReserveInventoryHandler (order 1) succeeded, then ProcessPaymentHandler (order 2) threw SimulatedFailureError. ' +
+            'The library auto-compensated by calling ReserveInventoryHandler.applyCompensatingEvent(), ' +
+            'which produced InventoryReleasedEvent. ' +
+            'Note: Compensating events (InventoryReleasedEvent) are side-effect events without @DomainEvent, ' +
+            'so they are not stored in the aggregate event stream. View the full compensation flow in MediatorFlow UI.'
+          : 'ReserveInventoryHandler (order 1) threw SimulatedFailureError immediately. ' +
+            'No prior critical consumers succeeded, so no compensation was needed.',
     };
   }
 }

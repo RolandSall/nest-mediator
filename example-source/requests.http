@@ -1,18 +1,38 @@
-### SOURCE MODE EXAMPLE
-### Requires DATABASE_URL:
-### DATABASE_URL=postgres://postgres:postgres@localhost:5434/source_example npm run start:dev
+##
+## nest-mediator example-source
+##
+## Start: DATABASE_URL=postgres://postgres:postgres@localhost:5434/source_example npm run start:dev
+## MediatorFlow dashboard: http://localhost:4800
+##
+
+###########################################################
+# SYSTEM
+###########################################################
 
 ### Get info
 GET http://localhost:3000
 
-### Get status
-GET http://localhost:3000/status
+### Get system status (event store enabled/disabled)
+GET http://localhost:3000/internals/status
 
-###
-### ORDER FLOW
-###
+### Get registered command & event handlers
+GET http://localhost:3000/internals/registered
 
-### Place an order
+### Get last 50 domain events from database
+GET http://localhost:3000/internals/events
+
+### Clear caching behavior cache
+POST http://localhost:3000/internals/cache/clear
+
+###########################################################
+# HAPPY PATH — Place & inspect an order
+###########################################################
+
+### 1. Place an order
+# Flow: PlaceOrderCommand → PlaceOrderHandler → OrderPlacedEvent
+#   → ReserveInventoryHandler (critical, order 1)
+#   → ProcessPaymentHandler (critical, order 2)
+#   → SendConfirmationEmailHandler (non-critical, fire-and-forget)
 POST http://localhost:3000/orders
 Content-Type: application/json
 
@@ -22,13 +42,22 @@ Content-Type: application/json
   "total": 999.99
 }
 
-### Get order (state rebuilt from events)
+### 2. Get order state (rebuilt from events)
+# Replace order-XXXXX with the ID from step 1
 GET http://localhost:3000/orders/order-XXXXX
 
-### Get order event history
+### 3. Get order event history
 GET http://localhost:3000/orders/order-XXXXX/events
 
-### Cancel order
+###########################################################
+# CANCEL FLOW — Triggers compensating transactions
+###########################################################
+
+### 4. Cancel the order
+# Flow: CancelOrderCommand → CancelOrderHandler → OrderCancelledEvent
+#   → ReleaseInventoryHandler (critical, order 1) — reverses inventory reservation
+#   → RefundPaymentHandler (critical, order 2) — reverses payment charge
+#   → SendCancellationEmailHandler (critical, order 3) — sends cancellation email
 POST http://localhost:3000/orders/order-XXXXX/cancel
 Content-Type: application/json
 
@@ -36,8 +65,100 @@ Content-Type: application/json
   "reason": "Customer requested cancellation"
 }
 
-### Get order again (now shows cancelled status - rebuilt from 2 events)
+### 5. Get order state (should show cancelled)
 GET http://localhost:3000/orders/order-XXXXX
 
-### Get event history (now shows 2 events: OrderPlacedEvent, OrderCancelledEvent)
+### 6. Get full event history (OrderPlacedEvent + OrderCancelledEvent)
 GET http://localhost:3000/orders/order-XXXXX/events
+
+###########################################################
+# CONCURRENCY CONFLICT — Optimistic locking demo
+###########################################################
+
+### 7. Test concurrency control
+# Creates an order, then fires TWO cancel commands simultaneously.
+# Both load the aggregate at the same version (sequence=1).
+# First cancel to persist wins; the second gets ConcurrencyError
+# because the sequence has already advanced.
+# Shows saga compensation in action when a critical consumer fails.
+POST http://localhost:3000/orders/test-concurrency
+
+###########################################################
+# COMPENSATION FAILURE SIMULATION — Saga compensation demo
+###########################################################
+
+### 8. Test compensation (payment failure)
+# Flow: PlaceOrderCommand → OrderPlacedEvent
+#   → ReserveInventoryHandler (order 1) → SUCCESS (inventory reserved)
+#   → ProcessPaymentHandler (order 2)   → THROWS SimulatedFailureError
+#   → Library auto-compensates:
+#       → ReserveInventoryHandler.applyCompensatingEvent() → InventoryReleasedEvent
+#       → HandleInventoryReleasedHandler processes the release
+POST http://localhost:3000/orders/test-compensation
+Content-Type: application/json
+
+{
+  "failAt": "payment"
+}
+
+### 9. Test compensation (inventory failure — early, no compensation needed)
+# Flow: PlaceOrderCommand → OrderPlacedEvent
+#   → ReserveInventoryHandler (order 1) → THROWS SimulatedFailureError
+#   → No prior critical consumers succeeded, so nothing to compensate
+POST http://localhost:3000/orders/test-compensation
+Content-Type: application/json
+
+{
+  "failAt": "inventory"
+}
+
+###########################################################
+# ERROR CASE — Cancel a non-existent order
+###########################################################
+
+### 8. Cancel non-existent order (expect 404 OrderNotFoundException)
+POST http://localhost:3000/orders/order-does-not-exist/cancel
+Content-Type: application/json
+
+{
+  "reason": "Testing error handling"
+}
+
+### 9. Get non-existent order (expect 404)
+GET http://localhost:3000/orders/order-does-not-exist
+
+###########################################################
+# MULTI-ORDER FLOW — Full lifecycle for MediatorFlow traces
+###########################################################
+
+### 10. Place order A
+POST http://localhost:3000/orders
+Content-Type: application/json
+
+{
+  "customerId": "cust-456",
+  "items": [{"productId": "keyboard", "quantity": 2}, {"productId": "mouse", "quantity": 1}],
+  "total": 149.97
+}
+
+### 11. Place order B
+POST http://localhost:3000/orders
+Content-Type: application/json
+
+{
+  "customerId": "cust-789",
+  "items": [{"productId": "monitor", "quantity": 1}],
+  "total": 599.99
+}
+
+### 12. Cancel order A (generates compensation trace)
+# Replace with order A's ID from step 10
+POST http://localhost:3000/orders/order-XXXXX/cancel
+Content-Type: application/json
+
+{
+  "reason": "Changed my mind about the keyboard"
+}
+
+### 13. Check all recent domain events
+GET http://localhost:3000/internals/events

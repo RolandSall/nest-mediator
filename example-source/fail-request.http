@@ -1,0 +1,17 @@
+###########################################################
+# COMPENSATION FAILURE SIMULATION — Saga compensation demo
+###########################################################
+
+### 8. Test compensation (payment failure)
+# Flow: PlaceOrderCommand → OrderPlacedEvent
+#   → ReserveInventoryHandler (order 1) → SUCCESS (inventory reserved)
+#   → ProcessPaymentHandler (order 2)   → THROWS SimulatedFailureError
+#   → Library auto-compensates:
+#       → ReserveInventoryHandler.applyCompensatingEvent() → InventoryReleasedEvent
+#       → HandleInventoryReleasedHandler processes the release
+POST http://localhost:3000/orders/test-compensation
+Content-Type: application/json
+
+{
+  "failAt": "payment"
+}
