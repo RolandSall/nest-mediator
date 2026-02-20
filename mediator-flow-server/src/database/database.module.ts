@@ -4,6 +4,7 @@ import { PG_POOL } from './constants';
 import { TopologyRepository } from './repositories/topology.repository';
 import { StepsRepository } from './repositories/steps.repository';
 import { TracesRepository } from './repositories/traces.repository';
+import { DiagramsRepository } from './repositories/diagrams.repository';
 
 @Global()
 @Module({
@@ -27,7 +28,8 @@ import { TracesRepository } from './repositories/traces.repository';
     TopologyRepository,
     StepsRepository,
     TracesRepository,
+    DiagramsRepository,
   ],
-  exports: [PG_POOL, TopologyRepository, StepsRepository, TracesRepository],
+  exports: [PG_POOL, TopologyRepository, StepsRepository, TracesRepository, DiagramsRepository],
 })
 export class DatabaseModule {}

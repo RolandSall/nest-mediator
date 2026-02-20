@@ -107,3 +107,13 @@ CREATE INDEX IF NOT EXISTS idx_traces_started ON traces (started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_traces_errors ON traces (has_errors) WHERE has_errors = TRUE;
 CREATE INDEX IF NOT EXISTS idx_traces_comp ON traces (has_compensations) WHERE has_compensations = TRUE;
 CREATE INDEX IF NOT EXISTS idx_traces_service ON traces (service_name);
+
+-- Diagrams (Visual Architecture Designer)
+CREATE TABLE IF NOT EXISTS diagrams (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name        VARCHAR(255) NOT NULL,
+  description TEXT,
+  graph       JSONB NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

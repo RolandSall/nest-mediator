@@ -104,7 +104,7 @@ PAYLOAD=$(cat <<EOF
       "type":          "COMMAND_DISPATCHED",
       "timestamp":     "${TS_01}",
       "correlationId": "${CORRELATION_ID}",
-      "causationId":   null,
+
       "name":          "ProcessPaymentCommand",
       "payload": {
         "orderId": "ORD-20250601-8812",
@@ -123,7 +123,7 @@ PAYLOAD=$(cat <<EOF
       "type":          "BEHAVIOR_ENTERED",
       "timestamp":     "${TS_02}",
       "correlationId": "${CORRELATION_ID}",
-      "causationId":   "${STEP_CMD_DISPATCHED}",
+
       "name":          "ExceptionHandlingBehavior",
       "durationMs":    348
     },
@@ -133,7 +133,7 @@ PAYLOAD=$(cat <<EOF
       "type":          "BEHAVIOR_ENTERED",
       "timestamp":     "${TS_03}",
       "correlationId": "${CORRELATION_ID}",
-      "causationId":   "${STEP_BHV_EXCEPTION}",
+
       "name":          "RetryBehavior",
       "durationMs":    344
     },
@@ -143,7 +143,6 @@ PAYLOAD=$(cat <<EOF
       "type":          "BEHAVIOR_ENTERED",
       "timestamp":     "${TS_04}",
       "correlationId": "${CORRELATION_ID}",
-      "causationId":   "${STEP_BHV_RETRY}",
       "name":          "LoggingBehavior",
       "durationMs":    340
     },
@@ -153,7 +152,6 @@ PAYLOAD=$(cat <<EOF
       "type":          "COMMAND_HANDLER_STARTED",
       "timestamp":     "${TS_05}",
       "correlationId": "${CORRELATION_ID}",
-      "causationId":   "${STEP_BHV_LOGGING}",
       "name":          "ProcessPaymentHandler",
       "durationMs":    35
     },
@@ -163,7 +161,6 @@ PAYLOAD=$(cat <<EOF
       "type":          "EVENT_PUBLISHED",
       "timestamp":     "${TS_06}",
       "correlationId": "${CORRELATION_ID}",
-      "causationId":   "${STEP_HANDLER_STARTED}",
       "eventId":       "${EVT_ID_PAYMENT_PROCESSED}",
       "name":          "PaymentProcessedEvent",
       "payload": {
@@ -173,7 +170,8 @@ PAYLOAD=$(cat <<EOF
       },
       "metadata": {
         "aggregateType": "Order",
-        "aggregateId": "ORD-20250601-8812"
+        "aggregateId": "ORD-20250601-8812",
+        "publishedBy": "ProcessPaymentHandler"
       }
     },
     {
@@ -182,7 +180,6 @@ PAYLOAD=$(cat <<EOF
       "type":          "SYSTEM_CONSUMER_STARTED",
       "timestamp":     "${TS_07}",
       "correlationId": "${CORRELATION_ID}",
-      "causationId":   "${STEP_EVT_PAYMENT}",
       "eventId":       "${EVT_ID_PAYMENT_PROCESSED}",
       "name":          "EventStorePersistenceConsumer"
     },
@@ -192,7 +189,6 @@ PAYLOAD=$(cat <<EOF
       "type":          "SYSTEM_CONSUMER_COMPLETED",
       "timestamp":     "${TS_08}",
       "correlationId": "${CORRELATION_ID}",
-      "causationId":   "${STEP_SYS_CONSUMER_STARTED}",
       "eventId":       "${EVT_ID_PAYMENT_PROCESSED}",
       "name":          "EventStorePersistenceConsumer",
       "durationMs":    4
@@ -203,7 +199,6 @@ PAYLOAD=$(cat <<EOF
       "type":          "CRITICAL_CONSUMER_STARTED",
       "timestamp":     "${TS_09}",
       "correlationId": "${CORRELATION_ID}",
-      "causationId":   "${STEP_EVT_PAYMENT}",
       "eventId":       "${EVT_ID_PAYMENT_PROCESSED}",
       "name":          "DeductInventoryHandler",
       "durationMs":    65,
@@ -215,7 +210,6 @@ PAYLOAD=$(cat <<EOF
       "type":          "EVENT_PUBLISHED",
       "timestamp":     "${TS_10}",
       "correlationId": "${CORRELATION_ID}",
-      "causationId":   "${STEP_CRIT_CONSUMER_STARTED}",
       "eventId":       "${EVT_ID_INV_DEDUCTION_FAILED}",
       "name":          "InventoryDeductionFailedEvent",
       "payload": {
@@ -226,7 +220,8 @@ PAYLOAD=$(cat <<EOF
       },
       "metadata": {
         "aggregateType": "Order",
-        "aggregateId": "ORD-20250601-8812"
+        "aggregateId": "ORD-20250601-8812",
+        "publishedBy": "DeductInventoryHandler"
       }
     },
     {
@@ -235,7 +230,6 @@ PAYLOAD=$(cat <<EOF
       "type":          "COMPENSATION_STARTED",
       "timestamp":     "${TS_11}",
       "correlationId": "${CORRELATION_ID}",
-      "causationId":   "${STEP_EVT_INV_FAILED}",
       "eventId":       "${EVT_ID_INV_DEDUCTION_FAILED}",
       "name":          "RefundPaymentHandler"
     },
@@ -245,7 +239,6 @@ PAYLOAD=$(cat <<EOF
       "type":          "COMPENSATION_COMPLETED",
       "timestamp":     "${TS_12}",
       "correlationId": "${CORRELATION_ID}",
-      "causationId":   "${STEP_COMP_REFUND_STARTED}",
       "eventId":       "${EVT_ID_INV_DEDUCTION_FAILED}",
       "name":          "RefundPaymentHandler",
       "durationMs":    35,
@@ -260,7 +253,6 @@ PAYLOAD=$(cat <<EOF
       "type":          "COMPENSATION_STARTED",
       "timestamp":     "${TS_13}",
       "correlationId": "${CORRELATION_ID}",
-      "causationId":   "${STEP_EVT_INV_FAILED}",
       "eventId":       "${EVT_ID_INV_DEDUCTION_FAILED}",
       "name":          "RestoreInventoryHandler"
     },
@@ -270,7 +262,6 @@ PAYLOAD=$(cat <<EOF
       "type":          "COMPENSATION_FAILED",
       "timestamp":     "${TS_14}",
       "correlationId": "${CORRELATION_ID}",
-      "causationId":   "${STEP_COMP_RESTORE_STARTED}",
       "eventId":       "${EVT_ID_INV_DEDUCTION_FAILED}",
       "name":          "RestoreInventoryHandler",
       "durationMs":    185,
@@ -282,7 +273,6 @@ PAYLOAD=$(cat <<EOF
       "type":          "COMPENSATING_EVENT_PUBLISHED",
       "timestamp":     "${TS_15}",
       "correlationId": "${CORRELATION_ID}",
-      "causationId":   "${STEP_COMP_REFUND_COMPLETED}",
       "eventId":       "${EVT_ID_PAYMENT_REFUNDED}",
       "name":          "PaymentRefundedEvent",
       "payload": {
@@ -293,7 +283,8 @@ PAYLOAD=$(cat <<EOF
       },
       "metadata": {
         "aggregateType": "Order",
-        "aggregateId": "ORD-20250601-8812"
+        "aggregateId": "ORD-20250601-8812",
+        "publishedBy": "RefundPaymentHandler"
       }
     }
   ]
