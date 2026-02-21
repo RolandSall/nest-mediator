@@ -17,13 +17,13 @@ A lightweight CQRS mediator for NestJS — start simple, add event persistence w
 - **Zero config** — Decorator-based auto-discovery, built on NestJS DI
 
 ### Topology View
-![Topology View](images/topology-view.png)
+![Topology View](https://raw.githubusercontent.com/RolandSall/nest-mediator/main/images/topology-view.png)
 
 ### Execution Trace — Flow
-![Execution Trace Flow](images/execution-trace-flow.png)
+![Execution Trace Flow](https://raw.githubusercontent.com/RolandSall/nest-mediator/main/images/execution-trace-flow.png)
 
 ### Execution Trace — Sequence
-![Execution Trace Sequence](images/execution-trace-sequence.png)
+![Execution Trace Sequence](https://raw.githubusercontent.com/RolandSall/nest-mediator/main/images/execution-trace-sequence.png)
 
 ## Installation
 
