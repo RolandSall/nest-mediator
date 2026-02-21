@@ -1,6 +1,6 @@
 {
   "name": "mediator-flow-server",
-  "version": "1.2.0-beta.1",
+  "version": "1.2.0-beta.2",
   "private": true,
   "scripts": {
     "dev:db": "docker compose -f docker-compose.dev.yml up -d",
