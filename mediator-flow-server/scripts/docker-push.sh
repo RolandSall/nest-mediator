@@ -2,6 +2,10 @@
 # Push MediatorFlow image to DockerHub.
 # Usage: ./scripts/docker-push.sh [version]
 # Prerequisites: docker login
+#
+# NOTE: The multi-platform build script (docker-build.sh) already pushes
+# during build via --push. This script is kept for manual re-pushes or
+# single-platform local builds.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
