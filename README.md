@@ -990,6 +990,35 @@ The embedded PostgreSQL is automatically skipped when `DATABASE_URL` points to a
 
 For full documentation, see the [DockerHub page](https://hub.docker.com/r/rolandsall24/mediatorflow).
 
+### Architect — Visual CQRS Designer
+
+The Architect tab in MediatorFlow lets you visually design your CQRS flows using drag-and-drop. Build your application architecture by placing nodes from the palette — Commands, Queries, Handlers, Events, Consumers, Behaviors, and Aggregates — onto a canvas and linking them together.
+
+#### Drag & Drop Flow Design
+![Architect Drag & Drop](https://raw.githubusercontent.com/RolandSall/nest-mediator/main/images/architect-drag-drop.png)
+
+- Drag nodes from the **Palette** (left sidebar) onto the canvas
+- Connect Commands/Queries to their Handlers, Handlers to Events, Events to Consumers
+- Visual edge labels (e.g., "handles") clarify the relationship between nodes
+- Zoom, pan, and resize nodes to organize complex flows
+
+#### Code Generation
+
+Once your flow is designed, click **Generate** to produce ready-to-use TypeScript/NestJS code compatible with `@rolandsall24/nest-mediator`. The generated code includes proper decorators, imports, and handler stubs — download everything as a zip file.
+
+![Architect Code Generation](https://raw.githubusercontent.com/RolandSall/nest-mediator/main/images/architect-code-generation.png)
+
+- Preview generated files with syntax highlighting before downloading
+- Each command/query gets its own file along with its handler
+- Code follows NestJS conventions with proper `@CommandHandler`/`@QueryHandler` decorators
+- Download as a zip to drop directly into your project
+
+#### AI Chat
+
+The Architect also includes an AI Chat panel where you can describe your CQRS flow in natural language (e.g., *"Build me an order management system with CreateOrder, CancelOrder commands..."*) and have it generate the flow diagram for you. Requires an OpenAI API key configured in settings.
+
+> **Note:** Code generation currently supports TypeScript + NestJS only.
+
 ### Zero Overhead When Disabled
 
 When `mediatorFlow.enabled` is `false` (or not set), the `StepEmitter` is still registered as a NestJS provider but its `emit()` method returns immediately on line 1 — zero allocation, zero network calls. The `wrapAsync()` method skips telemetry entirely and just executes your function directly. There is no performance impact when telemetry is off.
