@@ -25,6 +25,12 @@ A lightweight CQRS mediator for NestJS — start simple, add event persistence w
 ### Execution Trace — Sequence
 ![Execution Trace Sequence](https://raw.githubusercontent.com/RolandSall/nest-mediator/main/images/execution-trace-sequence.png)
 
+### Architect — Drag & Drop Flow Design
+![Architect Drag & Drop](https://raw.githubusercontent.com/RolandSall/nest-mediator/main/images/architect-drag-drop.png)
+
+### Architect — Code Generation
+![Architect Code Generation](https://raw.githubusercontent.com/RolandSall/nest-mediator/main/images/architect-code-generation.png)
+
 ## Installation
 
 ```bash
@@ -995,7 +1001,6 @@ For full documentation, see the [DockerHub page](https://hub.docker.com/r/roland
 The Architect tab in MediatorFlow lets you visually design your CQRS flows using drag-and-drop. Build your application architecture by placing nodes from the palette — Commands, Queries, Handlers, Events, Consumers, Behaviors, and Aggregates — onto a canvas and linking them together.
 
 #### Drag & Drop Flow Design
-![Architect Drag & Drop](https://raw.githubusercontent.com/RolandSall/nest-mediator/main/images/architect-drag-drop.png)
 
 - Drag nodes from the **Palette** (left sidebar) onto the canvas
 - Connect Commands/Queries to their Handlers, Handlers to Events, Events to Consumers
@@ -1006,8 +1011,6 @@ The Architect tab in MediatorFlow lets you visually design your CQRS flows using
 
 Once your flow is designed, click **Generate** to produce ready-to-use TypeScript/NestJS code compatible with `@rolandsall24/nest-mediator`. The generated code includes proper decorators, imports, and handler stubs — download everything as a zip file.
 
-![Architect Code Generation](https://raw.githubusercontent.com/RolandSall/nest-mediator/main/images/architect-code-generation.png)
-
 - Preview generated files with syntax highlighting before downloading
 - Each command/query gets its own file along with its handler
 - Code follows NestJS conventions with proper `@CommandHandler`/`@QueryHandler` decorators
@@ -1015,7 +1018,7 @@ Once your flow is designed, click **Generate** to produce ready-to-use TypeScrip
 
 #### AI Chat
 
-The Architect also includes an AI Chat panel where you can describe your CQRS flow in natural language (e.g., *"Build me an order management system with CreateOrder, CancelOrder commands..."*) and have it generate the flow diagram for you. Requires an OpenAI API key configured in settings.
+The Architect also includes an AI Chat panel where you can describe your CQRS flow in natural language (e.g., *"Build me an order management system with CreateOrder, CancelOrder commands..."*) and have it generate the flow diagram for you. Requires an OpenAI API key configured in settings. **This feature is currently in beta.**
 
 > **Note:** Code generation currently supports TypeScript + NestJS only.
 
