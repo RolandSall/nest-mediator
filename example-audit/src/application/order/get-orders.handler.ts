@@ -1,5 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { QueryHandler, IQueryHandler } from '@rolandsall24/nest-mediator';
+import { QueryHandler, IQueryHandler } from '@nest-mediator/core';
 import { GetOrdersQuery } from './get-orders.query';
 import { ORDER_PERSISTOR, IOrderPersistor } from './order-persistor.port';
 import { Order } from '../../domain/entities';

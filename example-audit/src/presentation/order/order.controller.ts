@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
-import { MediatorBus } from '@rolandsall24/nest-mediator';
+import { MediatorBus } from '@nest-mediator/core';
 import {
   CreateOrderCommand,
   CancelOrderCommand,

@@ -1,5 +1,5 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
-import { CommandHandler, ICommandHandler, MediatorBus } from '@rolandsall24/nest-mediator';
+import { CommandHandler, ICommandHandler, MediatorBus } from '@nest-mediator/core';
 import { CreateOrderCommand } from './create-order.command';
 import { ORDER_PERSISTOR, IOrderPersistor } from './order-persistor.port';
 import { OrderPlacedEvent } from '../../domain/events';

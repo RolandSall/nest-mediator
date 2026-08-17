@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { EventHandler, IEventConsumer, MediatorBus } from '@rolandsall24/nest-mediator';
+import { EventHandler, IEventConsumer, MediatorBus } from '@nest-mediator/core';
 import { OrderPlacedEvent, ConfirmationEmailSentEvent } from '../../domain/events';
 
 @Injectable()

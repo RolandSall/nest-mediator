@@ -9,7 +9,7 @@
     "baseUrl": ".",
     "rootDir": "src",
     "outDir": "dist",
-    "tsBuildInfoFile": "dist/tsconfig.lib.tsbuildinfo",
+    "tsBuildInfoFile": "node_modules/.cache/tsconfig.lib.tsbuildinfo",
     "moduleResolution": "node",
     "esModuleInterop": true,
     "skipLibCheck": true,

@@ -25,7 +25,7 @@ interface Dependency {
   type: string;
 }
 
-const LIB = '@rolandsall24/nest-mediator';
+const LIB = '@nest-mediator/core';
 
 // ── Command ──
 

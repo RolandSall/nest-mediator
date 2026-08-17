@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import {
   AggregateRepository,
   ForAggregate,
-} from '@rolandsall24/nest-mediator';
+} from '@nest-mediator/core';
 import { OrderAggregate } from '../../../domain/entities/order.aggregate';
 
 @Injectable()

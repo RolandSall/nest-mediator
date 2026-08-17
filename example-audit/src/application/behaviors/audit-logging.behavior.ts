@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { IPipelineBehavior, PipelineBehavior } from '@rolandsall24/nest-mediator';
+import { IPipelineBehavior, PipelineBehavior } from '@nest-mediator/core';
 import { AuditLoggingService } from './audit-logging.service';
 
 /**

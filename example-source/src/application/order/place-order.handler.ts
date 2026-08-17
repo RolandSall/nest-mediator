@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { CommandHandler, ICommandHandler } from '@rolandsall24/nest-mediator';
+import { CommandHandler, ICommandHandler } from '@nest-mediator/core';
 import { PlaceOrderCommand } from './place-order.command';
 import { OrderAggregateRepository } from '../../infrastructure/persistence/order';
 import { OrderAggregate } from '../../domain/entities/order.aggregate';

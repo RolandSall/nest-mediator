@@ -1,4 +1,4 @@
-import { IEvent } from '@rolandsall24/nest-mediator';
+import { IEvent } from '@nest-mediator/core';
 
 export class CancellationEmailSentEvent implements IEvent {
   constructor(

@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { CommandHandler, ICommandHandler } from '@rolandsall24/nest-mediator';
+import { CommandHandler, ICommandHandler } from '@nest-mediator/core';
 import { CancelOrderCommand } from './cancel-order.command';
 import { OrderAggregateRepository } from '../../infrastructure/persistence/order';
 import { OrderNotFoundException } from '../../domain/exceptions';

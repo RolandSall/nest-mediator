@@ -1,4 +1,4 @@
-import { IEvent, DomainEvent } from '@rolandsall24/nest-mediator';
+import { IEvent, DomainEvent } from '@nest-mediator/core';
 
 @DomainEvent('Order', 'orderId')
 export class OrderPlacedEvent implements IEvent {

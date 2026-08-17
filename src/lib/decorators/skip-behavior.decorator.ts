@@ -15,7 +15,7 @@ export const SKIP_BEHAVIORS_METADATA = 'SKIP_BEHAVIORS_METADATA';
  *
  * @example
  * ```typescript
- * import { PerformanceBehavior, LoggingBehavior } from '@rolandsall24/nest-mediator';
+ * import { PerformanceBehavior, LoggingBehavior } from '@nest-mediator/core';
  *
  * // Skip a single behavior
  * @SkipBehavior(PerformanceBehavior)
@@ -44,7 +44,7 @@ export const SkipBehavior = (
  *   PerformanceBehavior,
  *   LoggingBehavior,
  *   ValidationBehavior
- * } from '@rolandsall24/nest-mediator';
+ * } from '@nest-mediator/core';
  *
  * @SkipBehaviors([PerformanceBehavior, LoggingBehavior])
  * export class HealthCheckCommand {

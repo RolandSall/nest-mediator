@@ -1,4 +1,4 @@
-import { ICommand } from '@rolandsall24/nest-mediator';
+import { ICommand } from '@nest-mediator/core';
 
 export class CancelOrderCommand implements ICommand {
   constructor(

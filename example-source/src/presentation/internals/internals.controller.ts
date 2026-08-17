@@ -1,5 +1,5 @@
 import { Controller, Get, Inject, Optional, Post } from '@nestjs/common';
-import { MediatorBus, IEventStoreRepository, EVENT_STORE_REPOSITORY } from '@rolandsall24/nest-mediator';
+import { MediatorBus, IEventStoreRepository, EVENT_STORE_REPOSITORY } from '@nest-mediator/core';
 import { CachingBehavior } from '../../application/behaviors';
 
 /**

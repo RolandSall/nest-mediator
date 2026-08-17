@@ -1,4 +1,4 @@
-import { AggregateRoot } from '@rolandsall24/nest-mediator';
+import { AggregateRoot } from '@nest-mediator/core';
 import { OrderPlacedEvent, OrderCancelledEvent } from '../events';
 
 /**

@@ -1,4 +1,4 @@
-import { IEvent, DomainEvent } from '@rolandsall24/nest-mediator';
+import { IEvent, DomainEvent } from '@nest-mediator/core';
 
 /**
  * SOURCE MODE: Events use @DomainEvent decorator for aggregate tracking.

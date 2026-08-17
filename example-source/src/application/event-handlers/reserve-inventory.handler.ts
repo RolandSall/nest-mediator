@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { EventHandler, ICriticalEventConsumer, IEvent, MediatorBus, Critical } from '@rolandsall24/nest-mediator';
+import { EventHandler, ICriticalEventConsumer, IEvent, MediatorBus, Critical } from '@nest-mediator/core';
 import { OrderPlacedEvent, InventoryReservedEvent, InventoryReleasedEvent } from '../../domain/events';
 import { ChaosService } from '../chaos/chaos.service';
 import { SimulatedFailureError } from '../../domain/exceptions';

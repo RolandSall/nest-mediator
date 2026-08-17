@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { Pool } from 'pg';
-import { NestMediatorModule } from '@rolandsall24/nest-mediator';
+import { NestMediatorModule } from '@nest-mediator/core';
 import { OrderController } from './presentation/order/order.controller';
 import { InternalsController } from './presentation/internals/internals.controller';
 import {

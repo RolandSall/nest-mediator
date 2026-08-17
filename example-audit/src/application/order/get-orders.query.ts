@@ -1,3 +1,3 @@
-import { IQuery } from '@rolandsall24/nest-mediator';
+import { IQuery } from '@nest-mediator/core';
 
 export class GetOrdersQuery implements IQuery {}

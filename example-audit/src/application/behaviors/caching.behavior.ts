@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { IPipelineBehavior, PipelineBehavior } from '@rolandsall24/nest-mediator';
+import { IPipelineBehavior, PipelineBehavior } from '@nest-mediator/core';
 
 const cache = new Map<string, { data: any; expiry: number }>();
 

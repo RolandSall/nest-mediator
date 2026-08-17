@@ -1,5 +1,5 @@
 {
-  "name": "@rolandsall24/nest-mediator",
+  "name": "@nest-mediator/core",
   "version": "1.2.0",
   "description": "A lightweight CQRS (Command Query Responsibility Segregation) mediator pattern implementation for NestJS applications with optional event sourcing",
   "author": "Roland Salloum",
@@ -49,8 +49,8 @@
   },
   "files": [
     "dist",
-    "images",
     "README.md",
+    "MIGRATION.md",
     "LICENSE"
   ],
   "scripts": {

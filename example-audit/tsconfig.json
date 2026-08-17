@@ -21,8 +21,8 @@
     "noFallthroughCasesInSwitch": true,
     "esModuleInterop": true,
     "paths": {
-      "@rolandsall24/nest-mediator": ["../dist/index"],
-      "@rolandsall24/nest-mediator/*": ["../dist/*"]
+      "@nest-mediator/core": ["../dist/index"],
+      "@nest-mediator/core/*": ["../dist/*"]
     }
   }
 }

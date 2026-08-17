@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { IPipelineBehavior, PipelineBehavior } from '@rolandsall24/nest-mediator';
+import { IPipelineBehavior, PipelineBehavior } from '@nest-mediator/core';
 
 /**
  * Retry behavior for commands that may fail transiently.

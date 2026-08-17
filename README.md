@@ -2,6 +2,24 @@
 
 A lightweight CQRS mediator for NestJS — start simple, add event persistence when you need it, scale to full event sourcing when you're ready.
 
+> ### 📦 This package moved: `@rolandsall24/nest-mediator` → `@nest-mediator/core`
+>
+> Same library, same maintainer, same code — only the package name changed. The old package is deprecated and will not receive further updates.
+>
+> ```bash
+> npm uninstall @rolandsall24/nest-mediator
+> npm install @nest-mediator/core
+> ```
+>
+> Then update your imports:
+>
+> ```diff
+> - import { NestMediatorModule } from '@rolandsall24/nest-mediator';
+> + import { NestMediatorModule } from '@nest-mediator/core';
+> ```
+>
+> A one-line codemod and full details are in [MIGRATION.md](./MIGRATION.md). **No API changes** — nothing else in your code needs to move.
+
 ## Features
 
 - **CQRS** — Commands, Queries, and Domain Events with type-safe handlers
@@ -34,7 +52,7 @@ A lightweight CQRS mediator for NestJS — start simple, add event persistence w
 ## Installation
 
 ```bash
-npm install @rolandsall24/nest-mediator
+npm install @nest-mediator/core
 ```
 
 **TypeScript configuration** — enable decorators in `tsconfig.json`:
@@ -78,7 +96,7 @@ Pure CQRS with commands, queries, and domain events. No event store, no database
 
 ```typescript
 import { Module } from '@nestjs/common';
-import { NestMediatorModule } from '@rolandsall24/nest-mediator';
+import { NestMediatorModule } from '@nest-mediator/core';
 
 @Module({
   imports: [
@@ -99,7 +117,7 @@ export class AppModule {}
 ### Define Commands & Handlers
 
 ```typescript
-import { ICommand, ICommandHandler, CommandHandler, MediatorBus } from '@rolandsall24/nest-mediator';
+import { ICommand, ICommandHandler, CommandHandler, MediatorBus } from '@nest-mediator/core';
 
 // Command — a simple data container
 export class CreateUserCommand implements ICommand {
@@ -130,7 +148,7 @@ export class CreateUserHandler implements ICommandHandler<CreateUserCommand> {
 ### Define Queries & Handlers
 
 ```typescript
-import { IQuery, IQueryHandler, QueryHandler } from '@rolandsall24/nest-mediator';
+import { IQuery, IQueryHandler, QueryHandler } from '@nest-mediator/core';
 
 export class GetUserQuery implements IQuery {
   constructor(public readonly userId: string) {}
@@ -148,7 +166,7 @@ export class GetUserHandler implements IQueryHandler<GetUserQuery, UserDto> {
 ### Define Events & Consumers
 
 ```typescript
-import { IEvent, IEventConsumer, EventHandler, NonCritical } from '@rolandsall24/nest-mediator';
+import { IEvent, IEventConsumer, EventHandler, NonCritical } from '@nest-mediator/core';
 
 export class UserCreatedEvent implements IEvent {
   constructor(
@@ -342,7 +360,7 @@ export class AppModule {}
 The `@DomainEvent` decorator associates events with aggregates and registers them in a global event registry. **Required** for source mode (used for aggregate hydration). **Optional** for audit mode (only populates `aggregate_type`/`aggregate_id` columns for easier querying — has no effect on runtime behavior).
 
 ```typescript
-import { IEvent, DomainEvent } from '@rolandsall24/nest-mediator';
+import { IEvent, DomainEvent } from '@nest-mediator/core';
 
 @DomainEvent('Order', 'orderId')
 export class OrderPlacedEvent implements IEvent {
@@ -370,7 +388,7 @@ The first argument is the aggregate type name (must match `aggregateType` on you
 The aggregate encapsulates business rules and tracks state changes as events.
 
 ```typescript
-import { AggregateRoot } from '@rolandsall24/nest-mediator';
+import { AggregateRoot } from '@nest-mediator/core';
 
 export class OrderAggregate extends AggregateRoot<string> {
   private _orderId!: string;
@@ -435,7 +453,7 @@ With `@ForAggregate`, the repository is a one-liner. The decorator tells the bas
 
 ```typescript
 import { Injectable } from '@nestjs/common';
-import { AggregateRepository, ForAggregate } from '@rolandsall24/nest-mediator';
+import { AggregateRepository, ForAggregate } from '@nest-mediator/core';
 
 @Injectable()
 @ForAggregate(OrderAggregate)
@@ -842,7 +860,7 @@ NestMediatorModule.forRoot({
 MediatorFlow is a real-time monitoring dashboard that visualizes every command, query, event, and consumer execution in your application. It ships as a standalone server (`mediator-flow-server`) with an embedded React dashboard.
 
 ```
-NestJS App (@rolandsall24/nest-mediator)
+NestJS App (@nest-mediator/core)
     |
     +---> POST /collect/topology     (on boot — sends full architecture map)
     +---> POST /collect/steps        (batched — execution telemetry)
@@ -912,7 +930,7 @@ Add the `mediatorFlow` option to your module configuration. That's it — the li
 
 ```typescript
 import { Module } from '@nestjs/common';
-import { NestMediatorModule } from '@rolandsall24/nest-mediator';
+import { NestMediatorModule } from '@nest-mediator/core';
 
 @Module({
   imports: [
@@ -1009,7 +1027,7 @@ The Architect tab in MediatorFlow lets you visually design your CQRS flows using
 
 #### Code Generation
 
-Once your flow is designed, click **Generate** to produce ready-to-use TypeScript/NestJS code compatible with `@rolandsall24/nest-mediator`. The generated code includes proper decorators, imports, and handler stubs — download everything as a zip file.
+Once your flow is designed, click **Generate** to produce ready-to-use TypeScript/NestJS code compatible with `@nest-mediator/core`. The generated code includes proper decorators, imports, and handler stubs — download everything as a zip file.
 
 - Preview generated files with syntax highlighting before downloading
 - Each command/query gets its own file along with its handler
