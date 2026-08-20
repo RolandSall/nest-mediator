@@ -1157,9 +1157,18 @@ docker compose up -d                   # PostgreSQL on port 5433
 DATABASE_URL=postgres://postgres:postgres@localhost:5433/audit_example npm run start:dev
 ```
 
-To run the **event store on SQL Server** while orders stay in PostgreSQL, start the optional
-`sqlserver` compose service, create the database once, then set `EVENT_STORE_TYPE` and
-`EVENT_STORE_URL`. Omit those two variables and the example behaves exactly as above.
+**Running the event store on SQL Server.** This example uses two things that both need a
+database: the `orders` table, which is *this example's* own code (`PostgresOrderPersistenceAdapter`),
+and the `audit_events` log, which is the *library's* event store. Only the second one is
+configurable — so switching to SQL Server moves the event log there and leaves orders in
+PostgreSQL. That is why the commands below start both databases.
+
+(If you want everything in one SQL Server database, use **source mode** — see `example-source`,
+which has no `orders` table because state is rebuilt from events.)
+
+Start the optional `sqlserver` compose service, create the database once, then set
+`EVENT_STORE_TYPE` and `EVENT_STORE_URL`. Omit those two variables and the example runs entirely
+on PostgreSQL exactly as above.
 
 ```bash
 # 1. Start PostgreSQL + SQL Server (the sqlserver service is behind a profile)
