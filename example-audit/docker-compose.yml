@@ -11,5 +11,36 @@ services:
     volumes:
       - audit_pgdata:/var/lib/postgresql/data
 
+  # Optional: only needed to run the event store on SQL Server
+  # (EVENT_STORE_TYPE=sqlserver). Start it with:
+  #   docker compose --profile sqlserver up -d
+  #
+  # The official image is amd64 only; on Apple Silicon it runs under emulation,
+  # which is slower to boot but works.
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: nest-mediator-audit-mssql
+    platform: linux/amd64
+    profiles: ["sqlserver"]
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "NestMediator!2026"
+      MSSQL_PID: Developer
+    ports:
+      - "1433:1433"
+    volumes:
+      - audit_mssqldata:/var/opt/mssql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1' || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
 volumes:
   audit_pgdata:
+  audit_mssqldata:
