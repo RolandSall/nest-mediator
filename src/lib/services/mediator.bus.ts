@@ -80,12 +80,19 @@ export class MediatorBus implements IMediator {
      * @param command - The command instance to dispatch
      * @throws Error if no handler is registered for the command
      *
+     * `TResult` is inferred from the command type. Commands declared as plain
+     * `ICommand` resolve to `Promise<void>`, unchanged from previous versions.
+     *
      * @example
      * ```typescript
-     * await mediator.send(new PlaceOrderCommand({ customerId: '123', items }));
+     * // void — the default
+     * await mediator.send(new CancelOrderCommand(orderId));
+     *
+     * // returns a value when the command declares one
+     * const orderId = await mediator.send(new PlaceOrderCommand({ customerId: '123', items }));
      * ```
      */
-    async send<TCommand extends ICommand>(command: TCommand): Promise<void> {
+    async send<TResult = void>(command: ICommand): Promise<TResult> {
         return mediatorContext.runWithNewContext(() => {
             return this.commandBus.send(command);
         });

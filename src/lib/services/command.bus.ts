@@ -25,7 +25,7 @@ export class CommandBus implements ICommandBus {
    * Send a command to its handler through the pipeline
    * @param command - The command instance
    */
-  async send<TCommand extends ICommand>(command: TCommand): Promise<void> {
+  async send<TResult = void>(command: ICommand): Promise<TResult> {
     const commandName = command.constructor.name;
     const handlerType = this.handlers.get(commandName);
 
@@ -33,14 +33,14 @@ export class CommandBus implements ICommandBus {
       throw new HandlerNotFoundException(commandName, 'command');
     }
 
-    const handler = this.moduleRef.get<ICommandHandler<TCommand>>(handlerType, {
+    const handler = this.moduleRef.get<ICommandHandler<ICommand, TResult>>(handlerType, {
       strict: false,
     });
 
     this.stepEmitter?.emit(StepType.COMMAND_DISPATCHED, commandName);
 
     // Build and execute pipeline
-    const pipeline = this.pipelineOrchestrator.buildPipeline<TCommand, void>(
+    const pipeline = this.pipelineOrchestrator.buildPipeline<ICommand, TResult>(
       command,
       'command',
       () =>
@@ -61,7 +61,7 @@ export class CommandBus implements ICommandBus {
             })(),
     );
 
-    await pipeline();
+    return await pipeline();
   }
 
   /**

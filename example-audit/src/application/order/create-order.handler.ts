@@ -6,7 +6,7 @@ import { OrderPlacedEvent } from '../../domain/events';
 
 @Injectable()
 @CommandHandler(CreateOrderCommand)
-export class CreateOrderHandler implements ICommandHandler<CreateOrderCommand> {
+export class CreateOrderHandler implements ICommandHandler<CreateOrderCommand, string> {
   private readonly logger = new Logger(CreateOrderHandler.name);
 
   constructor(
@@ -14,7 +14,7 @@ export class CreateOrderHandler implements ICommandHandler<CreateOrderCommand> {
     private readonly mediatorBus: MediatorBus,
   ) {}
 
-  async execute(command: CreateOrderCommand): Promise<void> {
+  async execute(command: CreateOrderCommand): Promise<string> {
     const orderId = `order-${Date.now()}`;
 
     this.logger.log(`Creating order ${orderId} for customer ${command.customerId}`);
@@ -35,5 +35,9 @@ export class CreateOrderHandler implements ICommandHandler<CreateOrderCommand> {
     );
 
     this.logger.log(`Order ${orderId} created successfully`);
+
+    // Return the generated id to the caller — the handler owns id generation,
+    // so this is the only place it exists.
+    return orderId;
   }
 }

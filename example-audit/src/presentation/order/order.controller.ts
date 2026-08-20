@@ -23,14 +23,16 @@ export class OrderController {
 
   @Post('orders')
   async createOrder(@Body() body: CreateOrderApiRequest) {
-    await this.mediator.send(
+    // Command that RETURNS a value — the generated order id.
+    const orderId = await this.mediator.send<string>(
       new CreateOrderCommand(body.customerId, body.items, body.total),
     );
-    return { success: true, message: 'Order created successfully' };
+    return { success: true, orderId, message: 'Order created successfully' };
   }
 
   @Post('orders/:id/cancel')
   async cancelOrder(@Param('id') orderId: string, @Body() body: CancelOrderApiRequest) {
+    // Command that returns NOTHING — unchanged, still Promise<void>.
     await this.mediator.send(
       new CancelOrderCommand(orderId, body.reason),
     );
