@@ -10,14 +10,19 @@ import { Type } from '@nestjs/common';
  */
 export interface EventStoreConfig {
   /**
-   * Database type (required)
+   * Database type (required).
+   *
+   * Selects which dialect implementation is used. The matching driver must be
+   * installed: `pg` for 'postgres', `mssql` for 'sqlserver'. Drivers are loaded
+   * lazily, so only the one you actually use needs to be present.
    */
-  type: 'postgres';
+  type: 'postgres' | 'sqlserver';
 
   /**
    * Connection via URL - library creates and manages the pool
    * Must specify either url OR useExistingPool (not both)
-   * Example: 'postgres://user:pass@localhost:5432/mydb'
+   * Example (postgres):  'postgres://user:pass@localhost:5432/mydb'
+   * Example (sqlserver): 'Server=localhost,1433;Database=mydb;User Id=sa;Password=pass;Encrypt=false'
    */
   url?: string;
 

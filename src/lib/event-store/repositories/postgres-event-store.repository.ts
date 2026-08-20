@@ -1,5 +1,5 @@
 import { OnModuleDestroy } from '@nestjs/common';
-import { Pool } from 'pg';
+import type { Pool } from 'pg';
 import {
   IEventStoreRepository,
   StoredEvent,
