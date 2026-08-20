@@ -1157,15 +1157,28 @@ docker compose up -d                   # PostgreSQL on port 5433
 DATABASE_URL=postgres://postgres:postgres@localhost:5433/audit_example npm run start:dev
 ```
 
-To run the **event store on SQL Server** while orders stay in PostgreSQL, set `EVENT_STORE_TYPE`
-and `EVENT_STORE_URL`. Omit them and the example behaves exactly as above.
+To run the **event store on SQL Server** while orders stay in PostgreSQL, start the optional
+`sqlserver` compose service, create the database once, then set `EVENT_STORE_TYPE` and
+`EVENT_STORE_URL`. Omit those two variables and the example behaves exactly as above.
 
 ```bash
+# 1. Start PostgreSQL + SQL Server (the sqlserver service is behind a profile)
+docker compose --profile sqlserver up -d
+
+# 2. Create the database once (the library creates tables, never databases)
+docker compose exec sqlserver /opt/mssql-tools18/bin/sqlcmd \
+  -S localhost -U sa -P 'NestMediator!2026' -C \
+  -Q "IF DB_ID('audit_example') IS NULL CREATE DATABASE audit_example;"
+
+# 3. Run with the event store pointed at SQL Server
 DATABASE_URL=postgres://postgres:postgres@localhost:5433/audit_example \
 EVENT_STORE_TYPE=sqlserver \
-EVENT_STORE_URL='Server=localhost,1433;Database=audit_example;User Id=sa;Password={yourPassword};Encrypt=false;TrustServerCertificate=true' \
+EVENT_STORE_URL='Server=localhost,1433;Database=audit_example;User Id=sa;Password={NestMediator!2026};Encrypt=false;TrustServerCertificate=true' \
 npm run start:dev
 ```
+
+On startup you should see `Ensuring event store schema exists (sqlserver)...`. The official SQL
+Server image is amd64 only, so on Apple Silicon it runs under emulation.
 
 | Endpoint | Description |
 |----------|-------------|
