@@ -798,8 +798,14 @@ EventStore type: 'sqlserver' requires the 'mssql' package, which is not installe
 Install it with: npm install mssql
 ```
 
-SQL Server support requires **SQL Server 2016 or later** (filtered indexes). Everything in the
-rest of this section applies to both dialects — just swap the `type` and `url`.
+**Supported SQL Server versions:** 2008 and later, including **Azure SQL Database** and
+Azure SQL Managed Instance. The event store uses only `DATETIME2`, `SYSUTCDATETIME()`, and
+filtered indexes, all of which shipped in SQL Server 2008 — payloads are stored as
+`NVARCHAR(MAX)` and parsed in JavaScript, so no `JSON` functions are required. Any tag of the
+official image (`mcr.microsoft.com/mssql/server`, mirrored on Docker Hub as
+`microsoft/mssql-server`) is well above that floor. Tested against SQL Server 2022.
+
+Everything in the rest of this section applies to both dialects — just swap the `type` and `url`.
 
 ### Connection Options
 
