@@ -55,6 +55,15 @@ A lightweight CQRS mediator for NestJS — start simple, add event persistence w
 npm install @nest-mediator/core
 ```
 
+**Database driver** — only needed if you persist events (Audit or Source mode). Install the one
+matching your database; Simple mode needs neither, and drivers are loaded lazily so the one you
+skip is never imported.
+
+```bash
+npm install pg      # PostgreSQL  -> type: 'postgres'
+npm install mssql   # SQL Server  -> type: 'sqlserver'
+```
+
 **TypeScript configuration** — enable decorators in `tsconfig.json`:
 
 ```json
@@ -210,6 +219,10 @@ export class UserController {
 ## Mode 2: Audit (Event Logging)
 
 Everything from Simple mode, plus **every domain event is automatically persisted** to a PostgreSQL or SQL Server table. Your application still manages state in its own tables — the event log provides traceability, debugging, and compliance.
+
+The examples below use PostgreSQL. To run the event store on SQL Server instead, change `type`
+to `'sqlserver'` and pass a SQL Server connection string — everything else is identical. See
+[Choosing a Database](#choosing-a-database).
 
 ### What changes from Simple mode
 
@@ -1143,6 +1156,38 @@ cd example-audit
 docker compose up -d                   # PostgreSQL on port 5433
 DATABASE_URL=postgres://postgres:postgres@localhost:5433/audit_example npm run start:dev
 ```
+
+**Running the event store on SQL Server.** This example uses two things that both need a
+database: the `orders` table, which is *this example's* own code (`PostgresOrderPersistenceAdapter`),
+and the `audit_events` log, which is the *library's* event store. Only the second one is
+configurable — so switching to SQL Server moves the event log there and leaves orders in
+PostgreSQL. That is why the commands below start both databases.
+
+(If you want everything in one SQL Server database, use **source mode** — see `example-source`,
+which has no `orders` table because state is rebuilt from events.)
+
+Start the optional `sqlserver` compose service, create the database once, then set
+`EVENT_STORE_TYPE` and `EVENT_STORE_URL`. Omit those two variables and the example runs entirely
+on PostgreSQL exactly as above.
+
+```bash
+# 1. Start PostgreSQL + SQL Server (the sqlserver service is behind a profile)
+docker compose --profile sqlserver up -d
+
+# 2. Create the database once (the library creates tables, never databases)
+docker compose exec sqlserver /opt/mssql-tools18/bin/sqlcmd \
+  -S localhost -U sa -P 'NestMediator!2026' -C \
+  -Q "IF DB_ID('audit_example') IS NULL CREATE DATABASE audit_example;"
+
+# 3. Run with the event store pointed at SQL Server
+DATABASE_URL=postgres://postgres:postgres@localhost:5433/audit_example \
+EVENT_STORE_TYPE=sqlserver \
+EVENT_STORE_URL='Server=localhost,1433;Database=audit_example;User Id=sa;Password={NestMediator!2026};Encrypt=false;TrustServerCertificate=true' \
+npm run start:dev
+```
+
+On startup you should see `Ensuring event store schema exists (sqlserver)...`. The official SQL
+Server image is amd64 only, so on Apple Silicon it runs under emulation.
 
 | Endpoint | Description |
 |----------|-------------|
