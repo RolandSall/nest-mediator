@@ -30,6 +30,14 @@ import { PostgresOrderPersistenceAdapter } from './infrastructure/persistence/or
 
 const databaseUrl = process.env.DATABASE_URL;
 
+// The event store can run on a different engine than the app's own tables.
+// Defaults to PostgreSQL (same database as the orders table) so existing setups
+// are unchanged; set EVENT_STORE_TYPE=sqlserver + EVENT_STORE_URL to switch it.
+const eventStoreType = (process.env.EVENT_STORE_TYPE ?? 'postgres') as
+  | 'postgres'
+  | 'sqlserver';
+const eventStoreUrl = process.env.EVENT_STORE_URL ?? databaseUrl;
+
 /**
  * AUDIT MODE EXAMPLE
  *
@@ -48,10 +56,10 @@ const databaseUrl = process.env.DATABASE_URL;
       enableExceptionHandling: true,
       enablePerformanceTracking: true,
       performanceThresholdMs: 100,
-      eventStore: databaseUrl
+      eventStore: eventStoreUrl
         ? {
-            type: 'postgres',
-            url: databaseUrl,
+            type: eventStoreType,
+            url: eventStoreUrl,
             mode: 'audit',
             tableName: 'audit_events',
           }
