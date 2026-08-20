@@ -1,10 +1,7 @@
-import { Pool } from 'pg';
-import { EventStoreConfig, IEventStoreRepository } from '../../interfaces/index.js';
-
 /**
  * Schema manager interface for database schema operations.
+ *
+ * The canonical definition now lives alongside the dialects, since a schema manager
+ * is a per-engine concern. Re-exported here so the public type path is unchanged.
  */
-export interface ISchemaManager {
-  ensureSchema(pool: Pool, tableName?: string): Promise<void>;
-  createRepository(config: EventStoreConfig, pool: Pool, ownsPool: boolean): IEventStoreRepository;
-}
+export type { DbPool, ISchemaManager } from '../dialects/dialect.interface.js';
