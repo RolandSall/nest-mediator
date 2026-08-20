@@ -55,6 +55,15 @@ A lightweight CQRS mediator for NestJS — start simple, add event persistence w
 npm install @nest-mediator/core
 ```
 
+**Database driver** — only needed if you persist events (Audit or Source mode). Install the one
+matching your database; Simple mode needs neither, and drivers are loaded lazily so the one you
+skip is never imported.
+
+```bash
+npm install pg      # PostgreSQL  -> type: 'postgres'
+npm install mssql   # SQL Server  -> type: 'sqlserver'
+```
+
 **TypeScript configuration** — enable decorators in `tsconfig.json`:
 
 ```json
@@ -210,6 +219,10 @@ export class UserController {
 ## Mode 2: Audit (Event Logging)
 
 Everything from Simple mode, plus **every domain event is automatically persisted** to a PostgreSQL or SQL Server table. Your application still manages state in its own tables — the event log provides traceability, debugging, and compliance.
+
+The examples below use PostgreSQL. To run the event store on SQL Server instead, change `type`
+to `'sqlserver'` and pass a SQL Server connection string — everything else is identical. See
+[Choosing a Database](#choosing-a-database).
 
 ### What changes from Simple mode
 
@@ -1142,6 +1155,16 @@ The repository includes two complete example projects demonstrating clean archit
 cd example-audit
 docker compose up -d                   # PostgreSQL on port 5433
 DATABASE_URL=postgres://postgres:postgres@localhost:5433/audit_example npm run start:dev
+```
+
+To run the **event store on SQL Server** while orders stay in PostgreSQL, set `EVENT_STORE_TYPE`
+and `EVENT_STORE_URL`. Omit them and the example behaves exactly as above.
+
+```bash
+DATABASE_URL=postgres://postgres:postgres@localhost:5433/audit_example \
+EVENT_STORE_TYPE=sqlserver \
+EVENT_STORE_URL='Server=localhost,1433;Database=audit_example;User Id=sa;Password={yourPassword};Encrypt=false;TrustServerCertificate=true' \
+npm run start:dev
 ```
 
 | Endpoint | Description |

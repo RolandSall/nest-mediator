@@ -1,7 +1,7 @@
 {
   "name": "@nest-mediator/core",
   "version": "1.2.0",
-  "description": "A lightweight CQRS (Command Query Responsibility Segregation) mediator pattern implementation for NestJS applications with optional event sourcing",
+  "description": "A lightweight CQRS (Command Query Responsibility Segregation) mediator pattern implementation for NestJS applications with optional event sourcing on PostgreSQL or SQL Server",
   "author": "Roland Salloum",
   "license": "MIT",
   "homepage": "https://github.com/RolandSall/nest-mediator#readme",
@@ -34,7 +34,12 @@
     "typescript",
     "pipeline",
     "behaviors",
-    "validation"
+    "validation",
+    "postgres",
+    "postgresql",
+    "sqlserver",
+    "mssql",
+    "azure-sql"
   ],
   "main": "./dist/index.js",
   "module": "./dist/index.js",
