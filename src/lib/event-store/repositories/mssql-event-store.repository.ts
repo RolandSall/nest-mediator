@@ -62,8 +62,11 @@ export class MssqlEventStoreRepository
       .input('event_id', s.UniqueIdentifier, event.eventId)
       .input('event_type', s.NVarChar(255), event.eventType)
       .input('payload', s.NVarChar(s.MAX), JSON.stringify(event.payload))
-      .input('occurred_at', s.DateTime2, event.occurredAt)
-      .input('stored_at', s.DateTime2, event.storedAt)
+      // Bind UTC clock fields as DATETIME2. New DATETIMEOFFSET columns assign
+      // the omitted offset as +00:00, while legacy DATETIME2 columns keep the
+      // exact pre-upgrade parameter contract.
+      .input('occurred_at', s.DateTime2(7), event.occurredAt)
+      .input('stored_at', s.DateTime2(7), event.storedAt)
       .input('correlation_id', s.UniqueIdentifier, event.correlationId ?? null)
       .input('causation_id', s.UniqueIdentifier, event.causationId ?? null)
       .input('metadata', s.NVarChar(s.MAX), JSON.stringify(event.metadata ?? {}))

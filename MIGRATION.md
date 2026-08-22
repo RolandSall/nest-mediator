@@ -1,5 +1,68 @@
 # Migration Guide
 
+## Timezone-aware event timestamps
+
+New event-store tables use timezone-aware timestamp columns:
+
+- PostgreSQL: `TIMESTAMPTZ`
+- SQL Server: `DATETIMEOFFSET(7)` with offset `+00:00`
+
+Existing tables are never changed automatically. The built-in repositories
+continue to support the previous PostgreSQL `TIMESTAMP` and SQL Server
+`DATETIME2` columns, so upgrading the package requires no database migration.
+
+Only run the following migrations if you want existing database columns to
+carry explicit timezone semantics. Back up the table and validate representative
+rows before migrating.
+
+### PostgreSQL
+
+You must know which timezone the Node process used when it wrote the legacy
+rows. If it ran with `TZ=UTC`, migrate with:
+
+```sql
+BEGIN;
+
+ALTER TABLE domain_events
+  ALTER COLUMN occurred_at TYPE TIMESTAMPTZ
+    USING occurred_at AT TIME ZONE 'UTC',
+  ALTER COLUMN stored_at TYPE TIMESTAMPTZ
+    USING stored_at AT TIME ZONE 'UTC';
+
+COMMIT;
+```
+
+If the process used another timezone, replace `UTC` with its IANA timezone,
+for example `Asia/Beirut`. Using a region name preserves historical daylight
+saving rules better than using a fixed numeric offset.
+
+### SQL Server
+
+The built-in SQL Server driver writes UTC clock fields by default. When the
+legacy `DATETIME2` values are known to represent UTC, use:
+
+```sql
+ALTER TABLE domain_events
+  DROP CONSTRAINT DF_domain_events_stored_at;
+
+ALTER TABLE domain_events
+  ALTER COLUMN occurred_at DATETIMEOFFSET(7) NOT NULL;
+
+ALTER TABLE domain_events
+  ALTER COLUMN stored_at DATETIMEOFFSET(7) NOT NULL;
+
+ALTER TABLE domain_events
+  ADD CONSTRAINT DF_domain_events_stored_at
+  DEFAULT TODATETIMEOFFSET(SYSUTCDATETIME(), '+00:00') FOR stored_at;
+```
+
+This conversion assigns `+00:00` to the existing clock values. If an existing
+pool was configured with `useUTC: false`, determine the original timezone and
+use a staged migration with `TODATETIMEOFFSET` instead of running this script.
+
+Replace `domain_events` and the default-constraint name if you configured a
+custom `tableName`.
+
 ## `@rolandsall24/nest-mediator` → `@nest-mediator/core`
 
 The package was renamed from a personal scope to a project scope. **This is a rename only — there are no API changes, no behavior changes, and no code changes.** Every export, decorator, class, and option is identical.

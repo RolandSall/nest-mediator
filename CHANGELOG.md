@@ -2,6 +2,24 @@
 
 All notable changes to `@nest-mediator/core` are documented in this file.
 
+## Unreleased
+
+### Changed
+
+- Newly created PostgreSQL event tables use `TIMESTAMPTZ` for `occurred_at`
+  and `stored_at`.
+- Newly created SQL Server event tables use `DATETIMEOFFSET(7)` with an
+  explicit `+00:00` offset.
+
+### Backward compatibility
+
+- Existing `TIMESTAMP` and `DATETIME2` production tables are not altered and
+  remain supported by the built-in repositories.
+- `StoredEvent.occurredAt` and `storedAt` remain JavaScript `Date` values; no
+  public TypeScript API changed.
+- Added an optional migration guide for installations that want to upgrade
+  existing timestamp columns.
+
 ## 1.3.1 - 2026-08-22
 
 ### Added

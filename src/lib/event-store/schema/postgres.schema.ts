@@ -15,8 +15,8 @@ export function getPostgresSchema(tableName: string = 'domain_events'): string {
       event_id UUID PRIMARY KEY,
       event_type VARCHAR(255) NOT NULL,
       payload JSONB NOT NULL,
-      occurred_at TIMESTAMP NOT NULL,
-      stored_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      occurred_at TIMESTAMPTZ NOT NULL,
+      stored_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
       -- Correlation and causation for tracing
       correlation_id UUID,

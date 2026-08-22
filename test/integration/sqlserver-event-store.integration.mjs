@@ -18,6 +18,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { GenericContainer, Wait } from 'testcontainers';
 import { SqlServerDialect } from '../../dist/lib/event-store/dialects/sqlserver.dialect.js';
 import { ConcurrencyError } from '../../dist/lib/interfaces/event-store.interface.js';
+import { getSqlServerSchema } from '../../dist/lib/event-store/schema/sqlserver.schema.js';
 
 const SA_PASSWORD = 'NestMediator!2026';
 
@@ -105,6 +106,20 @@ async function main() {
 
   console.log(`\nSQL Server event store — table ${table}\n`);
 
+  await test('schema: new timestamp columns use DATETIMEOFFSET', async () => {
+    const result = await pool.request().query(
+      `SELECT COLUMN_NAME, DATA_TYPE
+         FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_NAME = '${table}'
+          AND COLUMN_NAME IN ('occurred_at', 'stored_at')`,
+    );
+    assert.strictEqual(result.recordset.length, 2);
+    assert.ok(
+      result.recordset.every((column) => column.DATA_TYPE === 'datetimeoffset'),
+      'expected both timestamp columns to use datetimeoffset',
+    );
+  });
+
   // ---------- AUDIT MODE ----------
   await test('audit: saveEvent persists a row', async () => {
     const event = makeEvent();
@@ -133,6 +148,61 @@ async function main() {
       .request()
       .query(`SELECT correlation_id FROM ${table} WHERE event_id = '${event.eventId}'`);
     assert.strictEqual(res.recordset[0].correlation_id, null);
+  });
+
+  await test('audit: timestamps round-trip as UTC with an explicit offset', async () => {
+    const timestamp = new Date('2026-08-22T12:34:56.789Z');
+    const event = makeEvent({ occurredAt: timestamp, storedAt: timestamp });
+    await repo.saveEvent(event);
+    const result = await pool.request().query(
+      `SELECT occurred_at, stored_at,
+              DATEPART(TZOFFSET, occurred_at) AS occurred_offset,
+              DATEPART(TZOFFSET, stored_at) AS stored_offset
+         FROM ${table}
+        WHERE event_id = '${event.eventId}'`,
+    );
+    const row = result.recordset[0];
+    assert.strictEqual(row.occurred_at.getTime(), timestamp.getTime());
+    assert.strictEqual(row.stored_at.getTime(), timestamp.getTime());
+    assert.strictEqual(row.occurred_offset, 0);
+    assert.strictEqual(row.stored_offset, 0);
+  });
+
+  await test('legacy: existing DATETIME2 tables remain usable and unchanged', async () => {
+    const legacyTable = `legacy_events_${Date.now()}`;
+    const legacySchema = getSqlServerSchema(legacyTable)
+      .replaceAll('DATETIMEOFFSET(7)', 'DATETIME2')
+      .replace(
+        "TODATETIMEOFFSET(SYSUTCDATETIME(), '+00:00')",
+        'SYSUTCDATETIME()',
+      );
+    await pool.request().batch(legacySchema);
+
+    // Schema initialization is intentionally create-only and must not alter it.
+    await dialect.schemaManager.ensureSchema(pool, legacyTable);
+    const columns = await pool.request().query(
+      `SELECT DATA_TYPE
+         FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_NAME = '${legacyTable}'
+          AND COLUMN_NAME IN ('occurred_at', 'stored_at')`,
+    );
+    assert.ok(columns.recordset.every((column) => column.DATA_TYPE === 'datetime2'));
+
+    const legacyRepo = dialect.schemaManager.createRepository(
+      { type: 'sqlserver', tableName: legacyTable },
+      pool,
+      false,
+    );
+    const timestamp = new Date('2026-08-22T12:34:56.789Z');
+    const event = makeEvent({ occurredAt: timestamp, storedAt: timestamp });
+    await legacyRepo.saveEvent(event);
+    const result = await pool.request().query(
+      `SELECT occurred_at, stored_at
+         FROM ${legacyTable}
+        WHERE event_id = '${event.eventId}'`,
+    );
+    assert.strictEqual(result.recordset[0].occurred_at.getTime(), timestamp.getTime());
+    assert.strictEqual(result.recordset[0].stored_at.getTime(), timestamp.getTime());
   });
 
   // ---------- SOURCE MODE ----------

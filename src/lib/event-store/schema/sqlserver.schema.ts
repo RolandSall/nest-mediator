@@ -7,7 +7,8 @@
  * Differences from the PostgreSQL schema are dialect-forced, not design choices:
  * SQL Server has no `CREATE TABLE IF NOT EXISTS` (hence the `OBJECT_ID` guards),
  * no `JSONB` type (payloads are `NVARCHAR(MAX)` holding JSON text), and spells
- * `UUID`/`TIMESTAMP`/`NOW()` as `UNIQUEIDENTIFIER`/`DATETIME2`/`SYSUTCDATETIME()`.
+ * `UUID`/`TIMESTAMPTZ`/`NOW()` as
+ * `UNIQUEIDENTIFIER`/`DATETIMEOFFSET`/`SYSUTCDATETIME()`.
  *
  * @param tableName - The table name to use (default: 'domain_events')
  * @returns SQL string for creating the schema
@@ -22,8 +23,9 @@ export function getSqlServerSchema(tableName: string = 'domain_events'): string 
         event_id UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
         event_type NVARCHAR(255) NOT NULL,
         payload NVARCHAR(MAX) NOT NULL,
-        occurred_at DATETIME2 NOT NULL,
-        stored_at DATETIME2 NOT NULL CONSTRAINT DF_${tableName}_stored_at DEFAULT SYSUTCDATETIME(),
+        occurred_at DATETIMEOFFSET(7) NOT NULL,
+        stored_at DATETIMEOFFSET(7) NOT NULL CONSTRAINT DF_${tableName}_stored_at
+          DEFAULT TODATETIMEOFFSET(SYSUTCDATETIME(), '+00:00'),
 
         -- Correlation and causation for tracing
         correlation_id UNIQUEIDENTIFIER NULL,
