@@ -74,27 +74,32 @@ export class MediatorBus implements IMediator {
      * Automatically creates a new correlation context so that all events
      * published during handling share the same `correlationId`.
      *
-     * Commands are fire-and-forget — they do not return a value.
-     * Use {@link query} when you need a result.
+     * Commands return nothing by default. A handler may return a value when the
+     * caller opts in with `send<TResult>(command)`. Use {@link query} for read
+     * operations; command results are intended for values produced by the
+     * write itself, such as a newly generated id.
      *
      * @param command - The command instance to dispatch
      * @throws Error if no handler is registered for the command
      *
-     * `TResult` is inferred from the command type. Commands declared as plain
-     * `ICommand` resolve to `Promise<void>`, unchanged from previous versions.
-     *
      * @example
      * ```typescript
-     * // void — the default
+     * // Promise<void> — unchanged from previous versions
      * await mediator.send(new CancelOrderCommand(orderId));
      *
-     * // returns a value when the command declares one
-     * const orderId = await mediator.send(new PlaceOrderCommand({ customerId: '123', items }));
+     * // Promise<string> — opt in to the handler result
+     * const orderId = await mediator.send<string>(
+     *   new PlaceOrderCommand({ customerId: '123', items })
+     * );
      * ```
      */
+    send<TCommand extends ICommand>(command: TCommand): Promise<void>;
+    send<TResult, TCommand extends ICommand = ICommand>(
+        command: TCommand
+    ): Promise<TResult>;
     async send<TResult = void>(command: ICommand): Promise<TResult> {
         return mediatorContext.runWithNewContext(() => {
-            return this.commandBus.send(command);
+            return this.commandBus.send<TResult, ICommand>(command);
         });
     }
 

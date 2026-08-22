@@ -23,6 +23,8 @@ A lightweight CQRS mediator for NestJS — start simple, add event persistence w
 ## Features
 
 - **CQRS** — Commands, Queries, and Domain Events with type-safe handlers
+- **Optional command results** — Return generated ids or write outcomes while
+  preserving `Promise<void>` as the default
 - **Three architecture modes** — Simple (no DB), Audit (event log), Source (event sourcing)
 - **Zero-boilerplate event sourcing** — `@ForAggregate` + `@DomainEvent` eliminate all wiring
 - **Critical & Non-Critical consumers** — Sequential saga-style or fire-and-forget
@@ -153,6 +155,39 @@ export class CreateUserHandler implements ICommandHandler<CreateUserCommand> {
   }
 }
 ```
+
+#### Optional command results
+
+Commands still return `void` by default, so existing commands and handlers do
+not need to change. A command may return a value produced by the write itself,
+such as a generated id:
+
+```typescript
+@Injectable()
+@CommandHandler(CreateUserCommand)
+export class CreateUserHandler
+  implements ICommandHandler<CreateUserCommand, string> {
+  async execute(command: CreateUserCommand): Promise<string> {
+    const userId = randomUUID();
+    // Save user to your database...
+    return userId;
+  }
+}
+
+const userId = await mediator.send<string>(
+  new CreateUserCommand('jane@example.com', 'Jane'),
+);
+```
+
+The result type is explicit at the call site; it is not inferred from the
+command marker. It must match the handler's second type argument. Continue to
+use queries for reads rather than using command results to fetch state.
+Any custom pipeline behavior applied to a result-returning command must return
+the value it receives from `next()`; the built-in behaviors already do so.
+
+Both `MediatorBus` and `IMediator` expose the two call forms. `ICommandBus`
+remains the void-returning low-level contract. Existing `send(command)` and
+`send<MyCommand>(command)` calls remain unchanged for backward compatibility.
 
 ### Define Queries & Handlers
 
