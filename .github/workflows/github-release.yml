@@ -1,0 +1,47 @@
+name: Publish GitHub Release Notes
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: github-release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release-notes:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+
+      - name: Verify tag matches package version
+        run: |
+          package_tag="v$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "$package_tag" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package version $package_tag" >&2
+            exit 1
+          fi
+
+      - name: Extract detailed release notes
+        run: node scripts/extract-release-notes.mjs "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.md"
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --notes-file "$RUNNER_TEMP/release-notes.md"
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --verify-tag \
+              --title "$GITHUB_REF_NAME" \
+              --notes-file "$RUNNER_TEMP/release-notes.md"
+          fi
