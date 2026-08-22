@@ -9,15 +9,9 @@ import { ICommandHandler } from './command-handler.interface.js';
 export interface ICommandBus {
   /**
    * Send a command to its handler.
-   *
-   * `TResult` is inferred from the command type, so callers never write type
-   * arguments. A command declared as `ICommand` (the default) resolves to
-   * `Promise<void>` exactly as before; a command declared as `ICommand<string>`
-   * resolves to `Promise<string>`.
-   *
    * @param command - The command instance
    */
-  send<TResult = void>(command: ICommand): Promise<TResult>;
+  send<TCommand extends ICommand>(command: TCommand): Promise<void>;
 
   /**
    * Register a command handler

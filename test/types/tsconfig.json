@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.lib.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../..",
+    "tsBuildInfoFile": "../../node_modules/.cache/command-results-types.tsbuildinfo"
+  },
+  "include": ["command-results.typecheck.ts"]
+}

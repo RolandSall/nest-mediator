@@ -23,7 +23,7 @@ export class OrderController {
 
   @Post('orders')
   async createOrder(@Body() body: CreateOrderApiRequest) {
-    // Command that RETURNS a value — the generated order id.
+    // Opt in to this command handler's string result.
     const orderId = await this.mediator.send<string>(
       new CreateOrderCommand(body.customerId, body.items, body.total),
     );

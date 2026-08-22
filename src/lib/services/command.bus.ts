@@ -25,6 +25,10 @@ export class CommandBus implements ICommandBus {
    * Send a command to its handler through the pipeline
    * @param command - The command instance
    */
+  send<TCommand extends ICommand>(command: TCommand): Promise<void>;
+  send<TResult, TCommand extends ICommand = ICommand>(
+    command: TCommand
+  ): Promise<TResult>;
   async send<TResult = void>(command: ICommand): Promise<TResult> {
     const commandName = command.constructor.name;
     const handlerType = this.handlers.get(commandName);
@@ -61,7 +65,7 @@ export class CommandBus implements ICommandBus {
             })(),
     );
 
-    return await pipeline();
+    return pipeline();
   }
 
   /**

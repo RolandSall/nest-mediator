@@ -10,7 +10,7 @@ import { ICommand } from './command.interface.js';
  *
  * @example
  * ```typescript
- * // Returns nothing — the default, and the recommended shape.
+ * // Returns nothing — the backward-compatible default.
  * class CancelOrderHandler implements ICommandHandler<CancelOrderCommand> {
  *   async execute(command: CancelOrderCommand): Promise<void> { ... }
  * }
