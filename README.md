@@ -28,7 +28,7 @@ A lightweight CQRS mediator for NestJS — start simple, add event persistence w
 - **Critical & Non-Critical consumers** — Sequential saga-style or fire-and-forget
 - **Saga compensation** — Automatic rollback via `applyCompensatingEvent()`
 - **Pipeline Behaviors** — Cross-cutting concerns (logging, validation, caching, retry)
-- **Flexible Event Store** — PostgreSQL-backed, bring your own pool or repository
+- **Flexible Event Store** — PostgreSQL or SQL Server, bring your own pool or repository
 - **Optimistic Concurrency** — Sequence-based version control with `ConcurrencyError`
 - **Correlation & Causation IDs** — Automatic distributed tracing via `AsyncLocalStorage`
 - **MediatorFlow Dashboard** — Real-time visual monitoring, topology graphs, execution tracing
@@ -72,7 +72,7 @@ NestJS Mediator grows with your application. Start simple, add what you need.
 
 | | **Simple** | **Audit** | **Source** |
 |---|---|---|---|
-| **Database required** | No | PostgreSQL | PostgreSQL |
+| **Database required** | No | PostgreSQL or SQL Server | PostgreSQL or SQL Server |
 | **State storage** | Your choice (in-memory, any DB) | Your tables (e.g., `orders`) | Event store only |
 | **Event persistence** | None | Events logged alongside state | Events ARE the state |
 | **Aggregates** | Not needed | Not needed | `AggregateRoot` + `AggregateRepository` |
@@ -209,7 +209,7 @@ export class UserController {
 
 ## Mode 2: Audit (Event Logging)
 
-Everything from Simple mode, plus **every domain event is automatically persisted** to a PostgreSQL table. Your application still manages state in its own tables — the event log provides traceability, debugging, and compliance.
+Everything from Simple mode, plus **every domain event is automatically persisted** to a PostgreSQL or SQL Server table. Your application still manages state in its own tables — the event log provides traceability, debugging, and compliance.
 
 ### What changes from Simple mode
 
@@ -745,7 +745,48 @@ export class HealthCheckQuery implements IQuery {}
 
 ## Event Store Configuration
 
-The event store is flexible — you control how it connects, what repository it uses, and what table it writes to.
+The event store is flexible — you control which database it speaks, how it connects, what
+repository it uses, and what table it writes to.
+
+### Choosing a Database
+
+Set `type` to pick the dialect. **PostgreSQL** and **SQL Server** are both supported, with
+identical behaviour: same `IEventStoreRepository` contract, same audit and source modes, same
+`ConcurrencyError` semantics.
+
+```typescript
+// PostgreSQL
+eventStore: {
+  type: 'postgres',
+  url: 'postgres://user:pass@localhost:5432/mydb',
+  mode: 'source',
+}
+
+// SQL Server
+eventStore: {
+  type: 'sqlserver',
+  url: 'Server=localhost,1433;Database=mydb;User Id=sa;Password=yourPassword;Encrypt=false',
+  mode: 'source',
+}
+```
+
+**Install only the driver you use.** Drivers are loaded lazily, so nothing is imported until
+you actually configure an event store — a Simple-mode app needs neither.
+
+```bash
+npm install pg      # for type: 'postgres'
+npm install mssql   # for type: 'sqlserver'
+```
+
+If the driver is missing you get an actionable error rather than a raw `MODULE_NOT_FOUND`:
+
+```
+EventStore type: 'sqlserver' requires the 'mssql' package, which is not installed.
+Install it with: npm install mssql
+```
+
+SQL Server support requires **SQL Server 2016 or later** (filtered indexes). Everything in the
+rest of this section applies to both dialects — just swap the `type` and `url`.
 
 ### Connection Options
 
@@ -775,7 +816,7 @@ eventStore: {
 
 ### Custom Event Store Repository
 
-If the built-in PostgreSQL repository doesn't fit your needs, implement `IEventStoreRepository` and register it yourself:
+If the built-in repository doesn't fit your needs, implement `IEventStoreRepository` and register it yourself:
 
 ```typescript
 @Injectable()
