@@ -31,6 +31,7 @@ A lightweight CQRS mediator for NestJS — start simple, add event persistence w
 - **Saga compensation** — Automatic rollback via `applyCompensatingEvent()`
 - **Pipeline Behaviors** — Cross-cutting concerns (logging, validation, caching, retry)
 - **Flexible Event Store** — PostgreSQL or SQL Server, bring your own pool or repository
+- **UTC-safe event timestamps** — Timezone-aware columns for newly created event tables
 - **Optimistic Concurrency** — Sequence-based version control with `ConcurrencyError`
 - **Correlation & Causation IDs** — Automatic distributed tracing via `AsyncLocalStorage`
 - **MediatorFlow Dashboard** — Real-time visual monitoring, topology graphs, execution tracing
@@ -355,7 +356,7 @@ Every event is stored with full context:
 | `correlation_id` | Groups all events from the same business transaction |
 | `causation_id` | Points to the parent event that caused this one |
 | `payload` | Full event data as JSON |
-| `occurred_at` | Timestamp |
+| `occurred_at` | Business timestamp stored as an absolute instant |
 
 ### When to use Audit mode
 
@@ -834,13 +835,30 @@ Install it with: npm install mssql
 ```
 
 **Supported SQL Server versions:** 2008 and later, including **Azure SQL Database** and
-Azure SQL Managed Instance. The event store uses only `DATETIME2`, `SYSUTCDATETIME()`, and
-filtered indexes, all of which shipped in SQL Server 2008 — payloads are stored as
+Azure SQL Managed Instance. The event store uses only `DATETIMEOFFSET`, `SYSUTCDATETIME()`,
+`TODATETIMEOFFSET()`, and filtered indexes, all of which shipped in SQL Server 2008 — payloads are stored as
 `NVARCHAR(MAX)` and parsed in JavaScript, so no `JSON` functions are required. Any tag of the
 official image (`mcr.microsoft.com/mssql/server`, mirrored on Docker Hub as
 `microsoft/mssql-server`) is well above that floor. Tested against SQL Server 2022.
 
 Everything in the rest of this section applies to both dialects — just swap the `type` and `url`.
+
+### UTC Event Timestamps
+
+`StoredEvent.occurredAt` and `storedAt` remain JavaScript `Date` values. Tables created by
+this release use timezone-aware database columns so the same instant survives environments
+whose local timezone is not UTC:
+
+| Database | New column type | Stored offset |
+|---|---|---|
+| PostgreSQL | `TIMESTAMPTZ` | Normalized internally as an absolute instant |
+| SQL Server | `DATETIMEOFFSET(7)` | `+00:00` |
+
+Schema initialization is intentionally create-only. Existing production tables using
+PostgreSQL `TIMESTAMP` or SQL Server `DATETIME2` are not altered and continue working with
+the built-in repositories. See [MIGRATION.md](./MIGRATION.md#timezone-aware-event-timestamps)
+for an optional migration. Before migrating PostgreSQL data, identify the timezone used by
+the Node process that wrote the legacy rows; it is required to preserve the original instants.
 
 ### Connection Options
 

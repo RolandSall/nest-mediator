@@ -86,12 +86,14 @@ export interface StoredEvent {
   payload: Record<string, unknown>;
 
   /**
-   * When the event occurred (business time)
+   * When the event occurred (business time), represented as an absolute instant.
+   * New built-in event-store tables persist this with timezone-aware columns.
    */
   occurredAt: Date;
 
   /**
-   * When the event was stored (system time)
+   * When the event was stored (system time), represented as an absolute instant.
+   * New built-in event-store tables persist this with timezone-aware columns.
    */
   storedAt: Date;
 

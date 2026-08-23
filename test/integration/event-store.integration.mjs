@@ -4,7 +4,8 @@
  * Run with: node test/integration/event-store.integration.mjs
  *
  * Prerequisites:
- * 1. Docker must be running (testcontainers spins up PostgreSQL automatically)
+ * 1. Docker must be running (testcontainers spins up PostgreSQL automatically),
+ *    OR set POSTGRES_TEST_URL to point at an existing PostgreSQL database.
  * 2. Install dependencies: npm install
  * 3. Build project: npm run build
  */
@@ -29,6 +30,20 @@ import { AggregateRoot } from '../../dist/lib/aggregate/aggregate-root.base.js';
 async function createTestRepository(pool, tableName) {
   await pool.query(getPostgresSchema(tableName));
   return new PostgresEventStoreRepository(pool, tableName);
+}
+
+async function withTimezone(timezone, callback) {
+  const previousTimezone = process.env.TZ;
+  process.env.TZ = timezone;
+  try {
+    return await callback();
+  } finally {
+    if (previousTimezone === undefined) {
+      delete process.env.TZ;
+    } else {
+      process.env.TZ = previousTimezone;
+    }
+  }
 }
 
 // ============================================
@@ -151,23 +166,27 @@ async function runTests() {
   console.log('='.repeat(60));
   console.log();
 
-  // Start PostgreSQL container
-  console.log('Starting PostgreSQL container...');
-  const container = await new GenericContainer('postgres:15-alpine')
-    .withEnvironment({
-      POSTGRES_USER: 'mediator',
-      POSTGRES_PASSWORD: 'mediator123',
-      POSTGRES_DB: 'mediator_test',
-    })
-    .withExposedPorts(5432)
-    .withWaitStrategy(Wait.forLogMessage('database system is ready to accept connections', 2))
-    .start();
+  let container;
+  let connectionString = process.env.POSTGRES_TEST_URL;
+  if (!connectionString) {
+    console.log('Starting PostgreSQL container...');
+    container = await new GenericContainer('postgres:15-alpine')
+      .withEnvironment({
+        POSTGRES_USER: 'mediator',
+        POSTGRES_PASSWORD: 'mediator123',
+        POSTGRES_DB: 'mediator_test',
+      })
+      .withExposedPorts(5432)
+      .withWaitStrategy(Wait.forLogMessage('database system is ready to accept connections', 2))
+      .start();
 
-  const host = container.getHost();
-  const port = container.getMappedPort(5432);
-  const connectionString = `postgres://mediator:mediator123@${host}:${port}/mediator_test`;
-
-  console.log(`✓ PostgreSQL container started on ${host}:${port}\n`);
+    const host = container.getHost();
+    const port = container.getMappedPort(5432);
+    connectionString = `postgres://mediator:mediator123@${host}:${port}/mediator_test`;
+    console.log(`✓ PostgreSQL container started on ${host}:${port}\n`);
+  } else {
+    console.log('Using POSTGRES_TEST_URL\n');
+  }
 
   const pool = new Pool({ connectionString });
 
@@ -181,6 +200,7 @@ async function runTests() {
     await testAggregateInfoExtractor();
     await testMediatorContext();
     await testPostgresRepository(pool);
+    await testLegacyPostgresTimestampTable(pool);
     await testAuditMode(pool);
     await testSourceMode(pool);
     await testAggregateReconstruction(pool);
@@ -194,8 +214,10 @@ async function runTests() {
     process.exit(1);
   } finally {
     await pool.end();
-    await container.stop();
-    console.log('PostgreSQL container stopped.');
+    if (container) {
+      await container.stop();
+      console.log('PostgreSQL container stopped.');
+    }
   }
 }
 
@@ -314,16 +336,29 @@ async function testPostgresRepository(pool) {
   const repo = await createTestRepository(pool, tableName);
   console.log('  ✓ Schema ensured successfully');
 
+  const timestampColumns = await pool.query(
+    `SELECT column_name, data_type
+       FROM information_schema.columns
+      WHERE table_name = $1
+        AND column_name IN ('occurred_at', 'stored_at')`,
+    [tableName],
+  );
+  assert(
+    timestampColumns.rows.every((column) => column.data_type === 'timestamp with time zone'),
+    'New PostgreSQL event tables should use timestamp with time zone',
+  );
+
   // Clean up test table
   await pool.query('DELETE FROM test_events_mjs');
 
   // Test saveEvent
+  const timestamp = new Date('2026-08-22T12:34:56.789Z');
   const event = {
     eventId: uuidv4(),
     eventType: 'TestEvent',
     payload: { message: 'Hello, World!' },
-    occurredAt: new Date(),
-    storedAt: new Date(),
+    occurredAt: timestamp,
+    storedAt: timestamp,
     status: 'committed',
     correlationId: uuidv4(),
     causationId: undefined,
@@ -333,8 +368,23 @@ async function testPostgresRepository(pool) {
     sequenceNumber: undefined,
   };
 
-  await repo.saveEvent(event);
+  await withTimezone('Asia/Beirut', () => repo.saveEvent(event));
   console.log('  ✓ Event saved successfully');
+
+  const timestampResult = await pool.query(
+    `SELECT occurred_at, stored_at
+       FROM ${tableName}
+      WHERE event_id = $1`,
+    [event.eventId],
+  );
+  assert(
+    timestampResult.rows[0].occurred_at.getTime() === timestamp.getTime(),
+    'occurred_at should round-trip as the same instant outside UTC',
+  );
+  assert(
+    timestampResult.rows[0].stored_at.getTime() === timestamp.getTime(),
+    'stored_at should round-trip as the same instant outside UTC',
+  );
 
   // Test getNextSequence
   const nextSeq = await repo.getNextSequence('Test', 'test-123');
@@ -342,6 +392,59 @@ async function testPostgresRepository(pool) {
   console.log('  ✓ getNextSequence works correctly');
 
   console.log('✓ PostgresEventStoreRepository tests passed\n');
+}
+
+async function testLegacyPostgresTimestampTable(pool) {
+  console.log('Test: Legacy PostgreSQL timestamp compatibility');
+  console.log('-'.repeat(40));
+
+  const tableName = 'legacy_timestamp_events_mjs';
+  const legacySchema = getPostgresSchema(tableName).replaceAll('TIMESTAMPTZ', 'TIMESTAMP');
+  await pool.query(legacySchema);
+
+  // Schema initialization must not alter a table created by an older release.
+  await pool.query(getPostgresSchema(tableName));
+  const timestampColumns = await pool.query(
+    `SELECT data_type
+       FROM information_schema.columns
+      WHERE table_name = $1
+        AND column_name IN ('occurred_at', 'stored_at')`,
+    [tableName],
+  );
+  assert(
+    timestampColumns.rows.every((column) => column.data_type === 'timestamp without time zone'),
+    'Existing legacy timestamp columns must remain unchanged',
+  );
+
+  const repo = new PostgresEventStoreRepository(pool, tableName);
+  const timestamp = new Date('2026-08-22T12:34:56.789Z');
+  const event = {
+    eventId: uuidv4(),
+    eventType: 'LegacyTimestampEvent',
+    payload: {},
+    occurredAt: timestamp,
+    storedAt: timestamp,
+  };
+
+  await withTimezone('Asia/Beirut', async () => {
+    await repo.saveEvent(event);
+    const result = await pool.query(
+      `SELECT occurred_at, stored_at
+         FROM ${tableName}
+        WHERE event_id = $1`,
+      [event.eventId],
+    );
+    assert(
+      result.rows[0].occurred_at.getTime() === timestamp.getTime(),
+      'The repository should remain compatible with legacy occurred_at columns',
+    );
+    assert(
+      result.rows[0].stored_at.getTime() === timestamp.getTime(),
+      'The repository should remain compatible with legacy stored_at columns',
+    );
+  });
+
+  console.log('✓ Legacy PostgreSQL timestamp compatibility passed\n');
 }
 
 async function testAuditMode(pool) {
