@@ -2,7 +2,7 @@
 
 All notable changes to `@nest-mediator/core` are documented in this file.
 
-## 1.3.2 - 2026-08-22
+## 1.3.2 - 2026-08-23
 
 ### Fixed
 
