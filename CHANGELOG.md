@@ -60,6 +60,8 @@ All notable changes to `@nest-mediator/core` are documented in this file.
   insert in a batch to fail and verifies that the first insert is absent.
 - PostgreSQL and SQL Server repository suites now use Testcontainers annotation
   discovery, typed injected resources, and library-owned container cleanup.
+- Updated `@integration-testing/testcontainers` to `0.1.0-beta.1` and adopted
+  `defineAnnotationProject`, removing consumer-owned annotation global setup.
 - Booted the source sample with `atomicAggregateSave` against its PostgreSQL
   container and verified order creation and persisted stream inspection.
 - CI installs the packed library as a production dependency and loads it on
