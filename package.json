@@ -77,8 +77,8 @@
     "test:integration": "npm run test:resilience && npm run test:integration:postgres",
     "test:integration:all": "npm run test:integration && npm run test:integration:sqlserver",
     "test:resilience": "npm run build && tsc --noEmit -p test/tsconfig.json && vitest run --config vitest.resilience.config.mts",
-    "test:integration:postgres": "npm run build && tsc --noEmit -p test/tsconfig.json && vitest run --config vitest.postgres.config.mts",
-    "test:integration:sqlserver": "npm run build && tsc --noEmit -p test/tsconfig.json && vitest run --config vitest.sqlserver.config.mts",
+    "test:integration:postgres": "npm run build && tsc --noEmit -p test/tsconfig.json && vitest run --config vitest.event-store.config.mts --project postgres",
+    "test:integration:sqlserver": "npm run build && tsc --noEmit -p test/tsconfig.json && vitest run --config vitest.event-store.config.mts --project sqlserver",
     "test:consumer-compatibility": "node scripts/verify-packed-consumer.mjs",
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
@@ -108,7 +108,7 @@
     "uuid": "9.0.1"
   },
   "devDependencies": {
-    "@integration-testing/testcontainers": "0.1.0-beta.0",
+    "@integration-testing/testcontainers": "0.1.0-beta.1",
     "@nestjs/common": "11.1.11",
     "@nestjs/core": "11.1.11",
     "@types/mssql": "^12.3.0",
