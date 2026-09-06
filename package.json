@@ -1,6 +1,6 @@
 {
   "name": "@nest-mediator/core",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "description": "A lightweight CQRS (Command Query Responsibility Segregation) mediator pattern implementation for NestJS applications with optional event sourcing on PostgreSQL or SQL Server",
   "author": "Roland Salloum",
   "license": "MIT",
@@ -70,11 +70,16 @@
     "release:minor": "npm version minor && npm publish --access public",
     "release:major": "npm version major && npm publish --access public",
     "release:notes": "node scripts/extract-release-notes.mjs",
-    "test:command-results": "npm run build && node test/command-results.runtime.mjs && npm run test:types",
-    "test:timestamps": "npm run build && node test/timestamp-schemas.runtime.mjs",
+    "test:library": "npm run build && npm run test:types && vitest run --config vitest.library.config.mts",
+    "test:command-results": "npm run build && vitest run test/runtime/command-results.test.ts --config vitest.library.config.mts && npm run test:types",
+    "test:timestamps": "npm run build && vitest run test/runtime/timestamp-schemas.test.ts --config vitest.library.config.mts",
     "test:types": "tsc -p test/types/tsconfig.json",
-    "test:integration": "node test/integration/event-store.integration.mjs",
-    "test:integration:sqlserver": "node test/integration/sqlserver-event-store.integration.mjs",
+    "test:integration": "npm run test:resilience && npm run test:integration:postgres",
+    "test:integration:all": "npm run test:integration && npm run test:integration:sqlserver",
+    "test:resilience": "npm run build && tsc --noEmit -p test/tsconfig.json && vitest run --config vitest.resilience.config.mts",
+    "test:integration:postgres": "npm run build && tsc --noEmit -p test/tsconfig.json && vitest run --config vitest.postgres.config.mts",
+    "test:integration:sqlserver": "npm run build && tsc --noEmit -p test/tsconfig.json && vitest run --config vitest.sqlserver.config.mts",
+    "test:consumer-compatibility": "node scripts/verify-packed-consumer.mjs",
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
     "docker:build": "cd mediator-flow-server && ./scripts/docker-build.sh",
@@ -103,6 +108,7 @@
     "uuid": "9.0.1"
   },
   "devDependencies": {
+    "@integration-testing/testcontainers": "0.1.0-beta.0",
     "@nestjs/common": "11.1.11",
     "@nestjs/core": "11.1.11",
     "@types/mssql": "^12.3.0",
@@ -112,9 +118,9 @@
     "mssql": "^12.7.0",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
-    "testcontainers": "^11.11.0",
     "ts-node": "10.9.2",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "4.1.11"
   },
   "workspaces": [
     "example-source",

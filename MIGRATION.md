@@ -1,5 +1,62 @@
 # Migration Guide
 
+## Atomic source aggregate saves
+
+No migration is required. Existing source-mode applications retain their
+current behavior unless they explicitly enable the option:
+
+```typescript
+NestMediatorModule.forRoot({
+  eventStore: {
+    type: 'postgres',
+    url: process.env.DATABASE_URL,
+    mode: 'source',
+    atomicAggregateSave: true,
+  },
+});
+```
+
+The enabled flow is:
+
+1. Collect all events currently uncommitted by the aggregate.
+2. Check the expected version and append all events in one event-store
+   transaction.
+3. Mark the aggregate events committed after the database commits.
+4. Dispatch critical and non-critical user consumers without running event
+   persistence again.
+
+This changes source-mode timing intentionally. All events from the aggregate
+operation are visible when the first user consumer runs. If a critical user
+consumer fails, `save()` rejects but the source events remain committed and do
+not return to the aggregate's uncommitted list.
+
+Applications providing a custom `IEventStoreRepository` must ensure that
+`appendEvents()` commits the complete supplied batch or none of it. The
+expected-version check must occur in that same transaction. No new repository
+method or database schema change is required.
+
+### Transition from per-event source persistence
+
+Atomic aggregate saving is recommended for new source-mode applications.
+Per-event persistence remains supported without a runtime warning throughout
+the 1.x line.
+
+The planned 2.0 architecture makes `AggregateRepository.save()` the sole
+source-mode persistence entry point and replaces
+`EventStorePersistenceConsumer` with an audit-only `AuditConsumer`. Neither
+change is made in this compatible 1.x release.
+
+To migrate:
+
+1. Enable `atomicAggregateSave: true` in the source-mode event-store options.
+2. Record state changes through an `AggregateRoot`.
+3. Persist the aggregate with `AggregateRepository.save()`.
+4. Do not call `mediator.publish()` directly for the aggregate's uncommitted
+   domain events. `AggregateRepository.save()` persists and dispatches them.
+
+Existing applications do not need to migrate immediately. Audit mode and
+direct event publication require no changes in 1.x.
+
 ## Timezone-aware event timestamps
 
 New event-store tables use timezone-aware timestamp columns:

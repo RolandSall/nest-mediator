@@ -58,6 +58,10 @@ A lightweight CQRS mediator for NestJS — start simple, add event persistence w
 npm install @nest-mediator/core
 ```
 
+The published library supports Node.js 18 and newer. Repository contributors
+use Node.js 22.22.0 for the Vitest and Testcontainers development toolchain;
+those test-only packages are not part of an application's production install.
+
 **Database driver** — only needed if you persist events (Audit or Source mode). Install the one
 matching your database; Simple mode needs neither, and drivers are loaded lazily so the one you
 skip is never imported.
@@ -387,6 +391,7 @@ Events **are** the data. There are no state tables. Application state is rebuilt
         type: 'postgres',
         url: process.env.DATABASE_URL,
         mode: 'source',
+        atomicAggregateSave: true,
         tableName: 'domain_events',
       },
     }),
@@ -581,6 +586,52 @@ Request B: load(order) -> version 3 -> cancel() -> save() -> expected 3, found 4
 ```
 
 The `example-source` project includes a `POST /orders/test-concurrency` endpoint that demonstrates this by placing an order and firing two cancel commands simultaneously.
+
+### Atomic Aggregate Saves
+
+Source mode can persist every uncommitted event produced by one aggregate
+operation in a single event-store transaction:
+
+```typescript
+eventStore: {
+  type: 'postgres',
+  url: process.env.DATABASE_URL,
+  mode: 'source',
+  atomicAggregateSave: true,
+}
+```
+
+With this option enabled, `AggregateRepository.save()` calls
+`appendEvents()` once with the complete event batch. PostgreSQL or SQL Server
+checks the expected aggregate version and inserts the batch in the same
+transaction. A failed insert or version conflict commits none of the events.
+
+User consumers run only after the append commits. A consumer failure does not
+remove committed source events, and the aggregate no longer reports those
+events as uncommitted. Applications that require guaranteed post-commit
+consumer delivery should process the stored stream with durable checkpoints.
+
+The option defaults to `false` in the 1.x line. Without it, events retain the
+existing ordering: persist one event, run its consumers, then proceed to the
+next event. This compatibility path remains supported without a runtime warning
+throughout 1.x. New source applications should enable
+`atomicAggregateSave: true` and save aggregate changes through
+`AggregateRepository.save()`.
+
+See the
+[bulk order-item example](docs/atomic-source-save-example.md) for why events
+from one aggregate operation are committed together and which events remain
+outside that transaction.
+
+The planned 2.0 architecture makes atomic aggregate saving the only source
+persistence path and replaces `EventStorePersistenceConsumer` with an
+audit-only `AuditConsumer`. Direct publication keeps its existing behavior in
+1.x.
+
+Custom `IEventStoreRepository` implementations used with this option must make
+`appendEvents()` atomic: commit every supplied event or none, and check
+`expectedVersion` in the same database transaction. Consumer dispatch remains
+the library's responsibility.
 
 ### When to use Source mode
 
@@ -952,6 +1003,7 @@ NestMediatorModule.forRoot({
     useExistingRepository?: string,         // bring your own repo (DI token)
     repository?: Type<IEventStoreRepository>, // custom repo class
     mode?: 'audit' | 'source',             // default: 'audit'
+    atomicAggregateSave?: boolean,          // source only; default: false
     tableName?: string,                     // default: 'domain_events'
   },
   mediatorFlow?: {
@@ -1364,3 +1416,27 @@ MIT
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+The repository toolchain is pinned to Node.js 22.22.0. With nvm:
+
+```bash
+nvm use
+npm ci --legacy-peer-deps
+```
+
+Run the library-only compatibility checks without Docker:
+
+```bash
+npm run test:library
+npm run test:consumer-compatibility
+```
+
+With Docker running, execute the application-level PostgreSQL resilience suite:
+
+```bash
+npm run test:resilience
+```
+
+The CI consumer matrix loads the packed production artifact on Node.js 18, 20,
+and 22. Test tooling uses Node.js 22.22.0 but does not raise the published
+library's Node.js requirement.

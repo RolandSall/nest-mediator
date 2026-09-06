@@ -56,6 +56,7 @@ if (!databaseUrl) {
         type: 'postgres',
         url: databaseUrl,
         mode: 'source',
+        atomicAggregateSave: true,
         tableName: 'domain_events',
       },
       mediatorFlow: {

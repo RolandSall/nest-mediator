@@ -1,0 +1,90 @@
+name: Library CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Use test toolchain Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Verify library behavior and types
+        run: npm run test:library
+
+      - name: Pack the consumer artifact
+        run: npm pack --ignore-scripts
+
+      - name: Upload the consumer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nest-mediator-package
+          path: nest-mediator-core-*.tgz
+          if-no-files-found: error
+
+  consumer-compatibility:
+    needs: verify
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18.20.8, 20.19.5, 22.22.0]
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Use consumer Node ${{ matrix.node-version }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Download the packed library
+        uses: actions/download-artifact@v4
+        with:
+          name: nest-mediator-package
+          path: package-artifact
+
+      - name: Verify a production consumer install
+        run: node scripts/verify-packed-consumer.mjs package-artifact/nest-mediator-core-*.tgz
+
+  resilience:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Use integration-test Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Run application resilience suite
+        run: npm run test:resilience
+
+      - name: Run PostgreSQL event-store suite
+        run: npm run test:integration:postgres
+
+      - name: Run SQL Server event-store suite
+        run: npm run test:integration:sqlserver
