@@ -59,6 +59,16 @@ export interface EventStoreConfig {
   mode?: 'audit' | 'source';
 
   /**
+   * Persist all uncommitted events from AggregateRepository.save() in one
+   * appendEvents() call before dispatching user consumers.
+   *
+   * This only applies to source mode. It is opt-in so existing applications
+   * retain the established per-event publish ordering.
+   * Default: false
+   */
+  atomicAggregateSave?: boolean;
+
+  /**
    * Custom table name
    * Default: 'domain_events'
    */
@@ -141,7 +151,10 @@ export interface IEventStoreRepository {
   saveEvent(event: StoredEvent): Promise<void>;
 
   /**
-   * Append events with sequence tracking and concurrency control (source mode)
+   * Atomically append events with sequence tracking and concurrency control.
+   *
+   * Implementations MUST commit every supplied event or none of them, and MUST
+   * check expectedVersion in the same transaction as the inserts.
    *
    * @param aggregateType - The aggregate type
    * @param aggregateId - The aggregate ID

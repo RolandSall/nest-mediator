@@ -85,7 +85,27 @@ export class EventBus implements IEventBus {
     event: TEvent,
     options?: { isCompensation?: boolean },
   ): Promise<EventPublishResult> {
-    const eventId = uuidv4();
+    return this.publishWithId(event, uuidv4(), options, false);
+  }
+
+  /**
+   * Dispatch an event that has already been committed by atomic source
+   * persistence. System consumers are skipped to prevent duplicate storage.
+   * @internal
+   */
+  async publishPersisted<TEvent extends IEvent>(
+    event: TEvent,
+    eventId: string,
+  ): Promise<EventPublishResult> {
+    return this.publishWithId(event, eventId, undefined, true);
+  }
+
+  private async publishWithId<TEvent extends IEvent>(
+    event: TEvent,
+    eventId: string,
+    options: { isCompensation?: boolean } | undefined,
+    skipSystemConsumers: boolean,
+  ): Promise<EventPublishResult> {
     const eventName = event.constructor.name;
 
     // Capture which handler is publishing this event (if any)
@@ -95,7 +115,10 @@ export class EventBus implements IEventBus {
     return mediatorContext.runWithCausation(eventId, async () => {
       const consumers = this.handlers.get(eventName) || [];
 
-      const hasConsumers = consumers.length > 0 || this.systemConsumers.length > 0;
+      const activeSystemConsumers = skipSystemConsumers
+        ? []
+        : this.systemConsumers;
+      const hasConsumers = consumers.length > 0 || activeSystemConsumers.length > 0;
 
       if (!hasConsumers) {
         this.logger.log(`No consumers registered for event: ${eventName}`);
@@ -128,7 +151,7 @@ export class EventBus implements IEventBus {
       );
 
       this.logger.log(
-        `Publishing event: ${eventName} to ${this.systemConsumers.length} system, ` +
+        `Publishing event: ${eventName} to ${activeSystemConsumers.length} system, ` +
           `${criticalConsumers.length} critical, and ${nonCriticalConsumers.length} non-critical consumers`
       );
 
@@ -140,7 +163,7 @@ export class EventBus implements IEventBus {
         // ========================================
         // SYSTEM PHASE (event store persistence)
         // ========================================
-        for (const systemConsumer of this.systemConsumers) {
+        for (const systemConsumer of activeSystemConsumers) {
           try {
             mediatorContext.getContext().currentHandlerName = systemConsumer.name;
             if (this.stepEmitter?.enabled) {

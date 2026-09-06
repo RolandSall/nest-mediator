@@ -2,6 +2,85 @@
 
 All notable changes to `@nest-mediator/core` are documented in this file.
 
+## 1.3.3 - 2026-09-06
+
+### Added
+
+- Source mode can opt in to `atomicAggregateSave`. The base
+  `AggregateRepository` then sends all uncommitted events to `appendEvents()`
+  in one batch before dispatching user consumers.
+
+### Source-mode guarantees
+
+- The built-in PostgreSQL and SQL Server repositories use one internal
+  database transaction for the complete aggregate append. An insertion failure
+  or optimistic-concurrency conflict commits none of the batch.
+- User consumers run only after the event batch commits. If a critical consumer
+  subsequently fails, the committed source events remain authoritative and the
+  aggregate does not retain them as uncommitted.
+- `IEventStoreRepository` has no new methods. Its existing `appendEvents()`
+  contract now explicitly requires atomic batch persistence and an
+  expected-version check in the same transaction.
+
+### Source-mode transition
+
+- Atomic aggregate saving is the recommended source-mode path for new
+  applications. Per-event persistence remains supported throughout the 1.x
+  line and does not emit a runtime deprecation warning.
+- Source-mode applications should enable `atomicAggregateSave`, make state
+  changes on an aggregate, and persist them through
+  `AggregateRepository.save()`. That method appends the aggregate's complete
+  uncommitted event batch before dispatching user consumers.
+- Direct `mediator.publish()` remains supported in 1.x and keeps its existing
+  per-event behavior.
+- The planned 2.0 architecture makes atomic aggregate saves the only source
+  persistence path and replaces `EventStorePersistenceConsumer` with an
+  audit-only `AuditConsumer`. These changes are not applied in this compatible
+  1.x release.
+- See the
+  [atomic source save example](docs/atomic-source-save-example.md) for the
+  aggregate consistency rationale and transaction boundary.
+
+### Validation
+
+- The repository development and integration-test runtime is now Node.js
+  22.22.0 so the Vitest resilience suite can use
+  `@integration-testing/testcontainers` with a real PostgreSQL container.
+- Added application-level coverage for successful persistence, event-store
+  failure, critical-consumer failure and compensation, and non-critical
+  consumer failure.
+- Added source-mode coverage for atomic two-event aggregate saves, persistence
+  failure before dispatch, post-commit consumer failure, and legacy ordering.
+- Added integration coverage proving that direct atomic aggregate saves create
+  one shared correlation context and existing correlation and causation values
+  are preserved across the complete event batch.
+- Migrated command-result, timestamp-schema, PostgreSQL, and SQL Server test
+  runners from standalone MJS scripts to type-checked TypeScript Vitest tests.
+- Added real PostgreSQL and SQL Server rollback coverage that forces the second
+  insert in a batch to fail and verifies that the first insert is absent.
+- PostgreSQL and SQL Server repository suites now use Testcontainers annotation
+  discovery, typed injected resources, and library-owned container cleanup.
+- Booted the source sample with `atomicAggregateSave` against its PostgreSQL
+  container and verified order creation and persisted stream inspection.
+- CI installs the packed library as a production dependency and loads it on
+  Node.js 18, 20, and 22.
+
+### Backward compatibility
+
+- The published package still supports Node.js 18 and newer. Its
+  `engines.node` declaration remains `>=18.0.0`, and library output continues
+  to target ES2021.
+- Vitest and `@integration-testing/testcontainers` are development-only
+  dependencies. They are not installed when an application installs
+  `@nest-mediator/core`.
+- `atomicAggregateSave` defaults to `false`, so existing source applications
+  keep the established per-event persistence and consumer ordering.
+- Audit mode and direct publication of non-aggregate events are unchanged.
+- Existing event-store schemas need no migration.
+- Custom repositories require no new method. They must satisfy the atomic
+  `appendEvents()` contract only when an application opts in to atomic
+  aggregate saving.
+
 ## 1.3.2 - 2026-08-23
 
 ### Fixed

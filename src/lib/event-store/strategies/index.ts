@@ -5,6 +5,7 @@ import { ExistingPoolStrategy } from './existing-pool.strategy.js';
 import { UrlConnectionStrategy } from './url-connection.strategy.js';
 import { CustomRepositoryStrategy } from './custom-repository.strategy.js';
 import { PersistenceConsumerRegistrar } from './persistence-consumer.strategy.js';
+import { AtomicSourcePublisher } from '../atomic-source-publisher.js';
 
 // Interfaces
 export { IEventStoreStrategy } from './event-store-strategy.interface.js';
@@ -43,4 +44,8 @@ export function configureEventStore(
   // 2. Always register the persistence consumer
   const registrar = new PersistenceConsumerRegistrar();
   providers.push(registrar.createProvider(config));
+
+  if (config.mode === 'source' && config.atomicAggregateSave) {
+    providers.push(AtomicSourcePublisher);
+  }
 }

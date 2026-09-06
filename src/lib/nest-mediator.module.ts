@@ -14,6 +14,7 @@ import {
   EventCriticalityMetadata,
 } from './decorators/index.js';
 import { configureEventStore } from './event-store/strategies/index.js';
+import { AtomicSourcePublisher } from './event-store/atomic-source-publisher.js';
 import {
   ICommand,
   ICommandHandler,
@@ -386,6 +387,12 @@ export class NestMediatorModule implements OnModuleInit {
         throw new Error('EventStore config.type is required');
       }
 
+      if (config.atomicAggregateSave && config.mode !== 'source') {
+        throw new Error(
+          "EventStore config.atomicAggregateSave requires mode: 'source'"
+        );
+      }
+
       // Count how many connection/repository options are set
       const optionsSet = [
         config.url,
@@ -454,7 +461,14 @@ export class NestMediatorModule implements OnModuleInit {
         },
       ],
       exports: options.eventStore
-        ? [MediatorBus, EVENT_STORE_REPOSITORY]
+        ? [
+            MediatorBus,
+            EVENT_STORE_REPOSITORY,
+            ...(options.eventStore.mode === 'source' &&
+            options.eventStore.atomicAggregateSave
+              ? [AtomicSourcePublisher]
+              : []),
+          ]
         : [MediatorBus],
       global: true,
     };

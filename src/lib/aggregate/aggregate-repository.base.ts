@@ -1,16 +1,17 @@
-import { Inject, Logger } from '@nestjs/common';
+import { Inject, Logger, Optional } from '@nestjs/common';
 import { IEvent, IEventBus, IEventStoreRepository, EVENT_STORE_REPOSITORY } from '../interfaces/index.js';
 import { AggregateRoot } from './aggregate-root.base.js';
 import { AGGREGATE_CLASS_METADATA } from '../decorators/for-aggregate.decorator.js';
 import { getEventClassesForAggregate } from '../decorators/domain-event.decorator.js';
 import { MediatorBus } from '../services/mediator.bus.js';
+import { AtomicSourcePublisher } from '../event-store/atomic-source-publisher.js';
 
 /**
  * Base class for aggregate repositories in event sourcing.
  *
  * Repositories handle loading and saving aggregates:
  * - Loading: Replay events from event store to rebuild aggregate state
- * - Saving: Publish uncommitted events via event bus (which persists + dispatches to consumers)
+ * - Saving: Persist uncommitted events and dispatch them to consumers
  *
  * Use the `@ForAggregate(AggregateClass)` decorator to eliminate all boilerplate.
  * The decorator + global `@DomainEvent` registry provide:
@@ -40,6 +41,10 @@ export abstract class AggregateRepository<
 
   @Inject(MediatorBus)
   protected readonly eventBus!: IEventBus;
+
+  @Optional()
+  @Inject(AtomicSourcePublisher)
+  private readonly atomicSourcePublisher?: AtomicSourcePublisher;
 
   /**
    * The aggregate type name, derived from the aggregate class metadata.
@@ -150,17 +155,18 @@ export abstract class AggregateRepository<
   }
 
   /**
-   * Save an aggregate by publishing its uncommitted events.
+   * Save an aggregate's uncommitted events.
    *
-   * Each event is published via the event bus, which:
-   * 1. Persists the event to the event store (system phase)
-   * 2. Dispatches to critical consumers (sequential, with compensation)
-   * 3. Dispatches to non-critical consumers (parallel, fire-and-forget)
+   * By default, each event follows the established publish flow independently.
+   * When source mode enables atomicAggregateSave, all events are appended in
+   * one repository transaction before any user consumer is invoked.
    *
-   * After all events are successfully published, they are marked as committed.
+   * The legacy flow marks events committed after all publications succeed. The
+   * atomic flow marks them committed immediately after batch persistence, before
+   * post-commit user consumers run.
    *
    * @param aggregate - The aggregate to save
-   * @throws Error if any event fails to publish (compensation will run for critical consumers)
+   * @throws Error if persistence or a critical user consumer fails
    */
   async save(aggregate: TAggregate): Promise<void> {
     const events = aggregate.getUncommittedEvents();
@@ -169,6 +175,25 @@ export abstract class AggregateRepository<
       return; // Nothing to save
     }
 
+    if (this.atomicSourcePublisher) {
+      await this.atomicSourcePublisher.save(aggregate);
+      return;
+    }
+
+    await this.saveWithPerEventPublishing(aggregate, events);
+  }
+
+  /**
+   * Preserve the original source-mode ordering for 1.x applications:
+   * persist one event, run its consumers, then continue to the next event.
+   *
+   * Atomic aggregate saving is recommended for new source-mode applications.
+   * This compatibility path remains supported throughout the 1.x line.
+   */
+  private async saveWithPerEventPublishing(
+    aggregate: TAggregate,
+    events: IEvent[]
+  ): Promise<void> {
     // Publish each event through the event bus
     // This triggers: persistence → critical consumers → non-critical consumers
     for (const event of events) {

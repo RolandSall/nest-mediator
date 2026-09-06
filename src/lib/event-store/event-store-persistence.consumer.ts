@@ -1,4 +1,3 @@
-import { v4 as uuidv4 } from 'uuid';
 import { IEvent, IEventConsumer } from '../interfaces/index.js';
 import {
   IEventStoreRepository,
@@ -7,6 +6,7 @@ import {
 } from '../interfaces/event-store.interface.js';
 import { AggregateInfoExtractor } from './aggregate-info.extractor.js';
 import { mediatorContext } from '../context/mediator-context.js';
+import { StoredEventFactory } from './stored-event.factory.js';
 
 /**
  * Internal system consumer that persists events to the database.
@@ -17,9 +17,14 @@ import { mediatorContext } from '../context/mediator-context.js';
  * Events are immutable - once stored, they are never modified or deleted.
  * Compensation is handled by emitting new compensating events, not by
  * modifying existing ones.
+ *
+ * This remains a 1.x compatibility component. The planned 2.0 design replaces
+ * it with an audit-only consumer and makes AggregateRepository.save() the sole
+ * source-mode persistence entry point.
  */
 export class EventStorePersistenceConsumer implements IEventConsumer<IEvent> {
   private readonly extractor = new AggregateInfoExtractor();
+  private readonly storedEventFactory = new StoredEventFactory();
 
   constructor(
     private readonly repository: IEventStoreRepository,
@@ -33,63 +38,30 @@ export class EventStorePersistenceConsumer implements IEventConsumer<IEvent> {
    */
   async handle(event: IEvent): Promise<void> {
     const context = mediatorContext.getContext();
-    const eventId = context.currentEventId ?? uuidv4();
     const aggregateInfo = this.extractor.extract(event);
-
-    const storedEvent: StoredEvent = {
-      eventId,
-      eventType: event.constructor.name,
-      payload: this.serializeEvent(event),
-      occurredAt: this.getEventTimestamp(event),
-      storedAt: new Date(),
-      correlationId: context.correlationId,
-      causationId: context.causationId,
-      metadata: {},
-      aggregateType: aggregateInfo?.type,
-      aggregateId: aggregateInfo?.id,
-      sequenceNumber: undefined,
-    };
+    const storedEvent: StoredEvent = this.storedEventFactory.create(
+      event,
+      context.currentEventId,
+    );
 
     // Determine save strategy based on mode and aggregate info
     if (this.config.mode === 'source' && aggregateInfo) {
-      // Source mode with aggregate - use append with concurrency check
-      const currentVersion = await this.repository.getNextSequence(
+      // Compatibility path: append one published aggregate event.
+      const nextSequence = await this.repository.getNextSequence(
         aggregateInfo.type,
         aggregateInfo.id
       );
-      storedEvent.sequenceNumber = currentVersion;
+      storedEvent.sequenceNumber = nextSequence;
 
       await this.repository.appendEvents(
         aggregateInfo.type,
         aggregateInfo.id,
         [storedEvent],
-        currentVersion - 1
+        nextSequence - 1
       );
     } else {
       // Audit mode OR no aggregate info - simple save
       await this.repository.saveEvent(storedEvent);
     }
-  }
-
-  /**
-   * Serialize the event to a plain object for storage.
-   */
-  private serializeEvent(event: IEvent): Record<string, unknown> {
-    // Get all own properties of the event
-    const payload: Record<string, unknown> = {};
-    for (const key of Object.keys(event)) {
-      payload[key] = (event as Record<string, unknown>)[key];
-    }
-    return payload;
-  }
-
-  /**
-   * Get the event timestamp, using occurredAt if present.
-   */
-  private getEventTimestamp(event: IEvent): Date {
-    const eventWithTimestamp = event as { occurredAt?: Date };
-    return eventWithTimestamp.occurredAt instanceof Date
-      ? eventWithTimestamp.occurredAt
-      : new Date();
   }
 }
