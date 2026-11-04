@@ -54,6 +54,7 @@
   },
   "files": [
     "dist",
+    "docs/atomic-source-save-example.md",
     "README.md",
     "CHANGELOG.md",
     "MIGRATION.md",

@@ -2,7 +2,7 @@
 
 All notable changes to `@nest-mediator/core` are documented in this file.
 
-## 1.3.3 - 2026-09-06
+## 1.3.3 - Unreleased
 
 ### Added
 
@@ -22,6 +22,23 @@ All notable changes to `@nest-mediator/core` are documented in this file.
   contract now explicitly requires atomic batch persistence and an
   expected-version check in the same transaction.
 
+### Save and dispatch order
+
+- `AggregateRepository.save()` collects every event currently uncommitted by
+  the aggregate and passes the complete batch to `appendEvents()` once.
+- The event store checks `expectedVersion` and appends the complete batch in
+  one transaction. If any insert or the version check fails, the transaction
+  rolls back, no consumer runs, and the aggregate retains its uncommitted
+  events.
+- After the batch commits, the aggregate marks every event committed and
+  publishes the events to user consumers sequentially in their original order.
+- If a critical consumer fails after commit, `save()` rejects and subsequent
+  publication stops. The complete source batch remains committed and the
+  aggregate does not restore those authoritative events to its uncommitted
+  list.
+- Guaranteed post-commit consumer delivery is outside this option's database
+  transaction and requires durable subscriber checkpoints or an outbox.
+
 ### Source-mode transition
 
 - Atomic aggregate saving is the recommended source-mode path for new
@@ -37,9 +54,9 @@ All notable changes to `@nest-mediator/core` are documented in this file.
   persistence path and replaces `EventStorePersistenceConsumer` with an
   audit-only `AuditConsumer`. These changes are not applied in this compatible
   1.x release.
-- See the
-  [atomic source save example](docs/atomic-source-save-example.md) for the
-  aggregate consistency rationale and transaction boundary.
+- See
+  [atomic source aggregate saves](docs/atomic-source-save-example.md) for the
+  complete transaction, dispatch, failure, and compatibility behavior.
 
 ### Validation
 

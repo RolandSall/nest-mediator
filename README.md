@@ -519,7 +519,8 @@ That's it. No constructor, no overrides. The base class provides:
 
 - **`findById(id)`** — loads events from the store, deserializes them via the `@DomainEvent` registry, and replays them to rebuild aggregate state
 - **`getById(id)`** — same as `findById` but throws if the aggregate doesn't exist
-- **`save(aggregate)`** — publishes each uncommitted event through the event bus (persistence + consumers)
+- **`save(aggregate)`** — persists uncommitted events and then dispatches them;
+  with `atomicAggregateSave`, persistence happens as one batch
 
 Need custom logic? Every method is overridable:
 
@@ -552,7 +553,7 @@ export class PlaceOrderHandler implements ICommandHandler<PlaceOrderCommand> {
       command.total,
     );
 
-    // Save publishes the event -> persistence -> critical consumers -> non-critical
+    // Atomic mode commits the event batch before dispatching consumers.
     await this.orderRepository.save(order);
   }
 }
@@ -601,32 +602,55 @@ eventStore: {
 }
 ```
 
-With this option enabled, `AggregateRepository.save()` calls
-`appendEvents()` once with the complete event batch. PostgreSQL or SQL Server
-checks the expected aggregate version and inserts the batch in the same
-transaction. A failed insert or version conflict commits none of the events.
+With this option enabled, `AggregateRepository.save()` calls `appendEvents()`
+once with the complete batch. PostgreSQL or SQL Server checks the expected
+aggregate version and appends every event in the same transaction. A failed
+insert or version conflict commits none of them and no consumer runs.
 
-User consumers run only after the append commits. A consumer failure does not
-remove committed source events, and the aggregate no longer reports those
-events as uncommitted. Applications that require guaranteed post-commit
-consumer delivery should process the stored stream with durable checkpoints.
+After commit, the aggregate marks the events committed and publishes them in
+order. If a critical consumer fails, `save()` rejects and later publication
+stops, but the complete source-event batch remains committed because it is
+already authoritative state.
 
-The option defaults to `false` in the 1.x line. Without it, events retain the
-existing ordering: persist one event, run its consumers, then proceed to the
-next event. This compatibility path remains supported without a runtime warning
-throughout 1.x. New source applications should enable
-`atomicAggregateSave: true` and save aggregate changes through
-`AggregateRepository.save()`.
+```text
+append event 1, event 2, event 3 -> COMMIT
+publish event 1                  -> succeeds
+publish event 2                  -> critical consumer fails
+publish event 3                  -> not reached
+save()                           -> rejects
+```
 
-See the
-[bulk order-item example](docs/atomic-source-save-example.md) for why events
-from one aggregate operation are committed together and which events remain
-outside that transaction.
+#### Backward-compatible upgrade
 
-The planned 2.0 architecture makes atomic aggregate saving the only source
-persistence path and replaces `EventStorePersistenceConsumer` with an
-audit-only `AuditConsumer`. Direct publication keeps its existing behavior in
-1.x.
+`atomicAggregateSave` is opt-in and defaults to `false`. Existing applications
+can upgrade without changing their configuration:
+
+```typescript
+eventStore: {
+  type: 'postgres',
+  url: process.env.DATABASE_URL,
+  mode: 'source',
+  // atomicAggregateSave is omitted, so the established flow is preserved.
+}
+```
+
+Omitting the option or setting `atomicAggregateSave: false` keeps the 1.x order:
+
+```text
+persist event 1 -> run event 1 consumers
+persist event 2 -> run event 2 consumers
+persist event 3 -> run event 3 consumers
+mark all aggregate events committed
+```
+
+No schema migration or custom repository API change is required. Enabling the
+option deliberately changes only the save ordering: the complete aggregate
+batch commits first, followed by consumer publication. Direct
+`mediator.publish()` retains its established per-event behavior.
+
+See [atomic source aggregate saves](docs/atomic-source-save-example.md) for the
+complete success and failure sequences, transaction boundary, legacy behavior,
+and custom repository contract.
 
 Custom `IEventStoreRepository` implementations used with this option must make
 `appendEvents()` atomic: commit every supplied event or none, and check
@@ -1022,72 +1046,16 @@ NestMediatorModule.forRoot({
 
 ## MediatorFlow — Visual Monitoring Dashboard
 
-MediatorFlow is a real-time monitoring dashboard that visualizes every command, query, event, and consumer execution in your application. It ships as a standalone server (`mediator-flow-server`) with an embedded React dashboard.
-
-```
-NestJS App (@nest-mediator/core)
-    |
-    +---> POST /collect/topology     (on boot — sends full architecture map)
-    +---> POST /collect/steps        (batched — execution telemetry)
-    |
-    v
-MediatorFlow Server (NestJS + PostgreSQL)
-    |
-    v
-React Dashboard (topology graph, trace list, execution flow, stats)
-```
-
-### What You Get
-
-- **Real-time stats dashboard** — Throughput, error rate, top slow handlers, top errors at a glance
-- **Interactive topology graph** — Visual map of your entire CQRS architecture: commands, handlers, events, consumers, behaviors, and their connections. Click any node for details.
-- **Paginated trace list** — Every command/query execution as a trace with status, duration, step count. Search and filter by entry name, status, or service.
-- **Execution flow visualization** — Click a trace to see a full DAG (directed acyclic graph) showing the causation chain: which handler published which event, which consumers ran, where errors occurred.
-- **Sequence diagram view** — Step-by-step chronological view with compact mode for dense traces
-- **Compensation chain display** — When saga compensation fires, see the full rollback flow
-- **Category filtering** — Toggle visibility of commands, events, consumers, behaviors in any graph view
-- **Resizable graph nodes** — Drag to resize any node in topology or execution flow views
+MediatorFlow is the optional real-time dashboard for topology, execution traces,
+performance statistics, sequence views, and compensation chains.
 
 ### Quick Start — Docker (Recommended)
-
-**Option A: Pull from DockerHub** (fastest)
 
 ```bash
 docker run -d -p 4800:4800 --name mediatorflow rolandsall24/mediatorflow:latest
 ```
 
-**Option B: Build locally**
-
-```bash
-cd mediator-flow-server
-npm run docker:up       # builds and starts on port 4800
-```
-
 Open [http://localhost:4800](http://localhost:4800) to see the dashboard.
-
-To stop:
-```bash
-npm run docker:down
-# or if using Option A:
-docker rm -f mediatorflow
-```
-
-### Quick Start — Local Development
-
-```bash
-cd mediator-flow-server
-
-# 1. Start PostgreSQL (port 5433)
-npm run dev:db
-
-# 2. Start API + UI with hot reload
-npm run dev:start
-
-# To stop everything:
-npm run dev:stop
-```
-
-The API runs on `http://localhost:4000` and the UI dev server on `http://localhost:5173`.
 
 ### Enable Telemetry in Your App
 
@@ -1113,101 +1081,26 @@ import { NestMediatorModule } from '@nest-mediator/core';
 export class AppModule {}
 ```
 
-### Configuration Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `enabled` | — | Enable/disable telemetry export |
-| `collectorUrl` | — | MediatorFlow server URL (e.g., `http://localhost:4800`) |
-| `serviceName` | `'unknown'` | Service name shown in the dashboard |
-| `batchSize` | `50` | Number of steps to buffer before flushing |
-| `flushIntervalMs` | `2000` | Maximum time between flushes (ms) |
-| `includePayloads` | `false` | Include command/event payloads in telemetry (may contain sensitive data) |
-| `httpTimeoutMs` | `3000` | Timeout for HTTP flush calls to the collector |
-
 ### How It Works
 
-**On application boot**, the library sends your full architecture topology to the MediatorFlow server — every registered command, handler, event, consumer (with criticality and compensation info), behavior (with priority and scope), and aggregate. This builds the topology graph.
-
-**During runtime**, every execution step is captured as a lightweight telemetry event:
-
-| Step Type | When |
-|-----------|------|
-| `COMMAND_DISPATCHED` | Command enters the mediator |
-| `COMMAND_HANDLER_STARTED/COMPLETED/FAILED` | Handler lifecycle |
-| `QUERY_DISPATCHED` | Query enters the mediator |
-| `QUERY_HANDLER_STARTED/COMPLETED/FAILED` | Handler lifecycle |
-| `BEHAVIOR_ENTERED/COMPLETED/FAILED` | Pipeline behavior execution |
-| `EVENT_PUBLISHED` | Event dispatched to consumers |
-| `CRITICAL_CONSUMER_STARTED/COMPLETED/FAILED` | Critical consumer lifecycle |
-| `NONCRITICAL_CONSUMER_DISPATCHED/COMPLETED/FAILED` | Non-critical consumer lifecycle |
-| `COMPENSATION_STARTED/COMPLETED/FAILED` | Compensation chain execution |
-| `COMPENSATING_EVENT_PUBLISHED` | Compensating event emitted |
-
-Steps are buffered in memory and flushed to the server in batches — either when the buffer reaches `batchSize` or every `flushIntervalMs`, whichever comes first. Flushing is fire-and-forget: if the server is down, steps are dropped and the application continues normally.
-
-Each step carries the `correlationId` and `causationId` from `AsyncLocalStorage`, so the dashboard can reconstruct the full execution tree for any trace.
-
-### External Database
-
-By default, Docker mode runs PostgreSQL inside the container. To use an external database (e.g., AWS RDS):
-
-```bash
-docker run -d -p 4800:4800 \
-  -e DATABASE_URL=postgres://user:pass@your-rds.amazonaws.com:5432/mediatorflow \
-  rolandsall24/mediatorflow:latest
-```
-
-Or with docker compose:
-
-```bash
-DATABASE_URL=postgres://user:pass@your-rds.amazonaws.com:5432/mediatorflow \
-  docker compose up -d
-```
-
-The embedded PostgreSQL is automatically skipped when `DATABASE_URL` points to a non-localhost host. Schema migrations run against the external database.
-
-### Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DATABASE_URL` | External PostgreSQL connection string (skips embedded DB) | — |
-| `PORT` | API port | `4800` |
-| `POSTGRES_USER` | Embedded DB username | `mediatorflow` |
-| `POSTGRES_PASSWORD` | Embedded DB password | `mediatorflow` |
-| `POSTGRES_DB` | Embedded DB name | `mediatorflow` |
-
-For full documentation, see the [DockerHub page](https://hub.docker.com/r/rolandsall24/mediatorflow).
+On startup, the library exports the discovered mediator topology. During
+execution it batches lifecycle steps for commands, queries, behaviors, events,
+consumers, and compensations. Correlation and causation identifiers let the
+dashboard reconstruct each execution tree. Export is fire-and-forget; an
+unavailable dashboard does not interrupt application work.
 
 ### Architect — Visual CQRS Designer
 
-The Architect tab in MediatorFlow lets you visually design your CQRS flows using drag-and-drop. Build your application architecture by placing nodes from the palette — Commands, Queries, Handlers, Events, Consumers, Behaviors, and Aggregates — onto a canvas and linking them together.
-
-#### Drag & Drop Flow Design
-
-- Drag nodes from the **Palette** (left sidebar) onto the canvas
-- Connect Commands/Queries to their Handlers, Handlers to Events, Events to Consumers
-- Visual edge labels (e.g., "handles") clarify the relationship between nodes
-- Zoom, pan, and resize nodes to organize complex flows
-
-#### Code Generation
-
-Once your flow is designed, click **Generate** to produce ready-to-use TypeScript/NestJS code compatible with `@nest-mediator/core`. The generated code includes proper decorators, imports, and handler stubs — download everything as a zip file.
-
-- Preview generated files with syntax highlighting before downloading
-- Each command/query gets its own file along with its handler
-- Code follows NestJS conventions with proper `@CommandHandler`/`@QueryHandler` decorators
-- Download as a zip to drop directly into your project
-
-#### AI Chat
-
-The Architect also includes an AI Chat panel where you can describe your CQRS flow in natural language (e.g., *"Build me an order management system with CreateOrder, CancelOrder commands..."*) and have it generate the flow diagram for you. Requires an OpenAI API key configured in settings. **This feature is currently in beta.**
-
-> **Note:** Code generation currently supports TypeScript + NestJS only.
+The Architect tab provides drag-and-drop CQRS design and TypeScript/NestJS
+code generation.
 
 ### Zero Overhead When Disabled
 
-When `mediatorFlow.enabled` is `false` (or not set), the `StepEmitter` is still registered as a NestJS provider but its `emit()` method returns immediately on line 1 — zero allocation, zero network calls. The `wrapAsync()` method skips telemetry entirely and just executes your function directly. There is no performance impact when telemetry is off.
+When `mediatorFlow.enabled` is `false` or omitted, telemetry performs no network
+calls and wrapped operations execute normally.
+
+For external database configuration and deployment details, see the
+[MediatorFlow DockerHub documentation](https://hub.docker.com/r/rolandsall24/mediatorflow).
 
 ---
 
@@ -1268,37 +1161,9 @@ docker compose up -d                   # PostgreSQL on port 5433
 DATABASE_URL=postgres://postgres:postgres@localhost:5433/audit_example npm run start:dev
 ```
 
-**Running the event store on SQL Server.** This example uses two things that both need a
-database: the `orders` table, which is *this example's* own code (`PostgresOrderPersistenceAdapter`),
-and the `audit_events` log, which is the *library's* event store. Only the second one is
-configurable — so switching to SQL Server moves the event log there and leaves orders in
-PostgreSQL. That is why the commands below start both databases.
-
-(If you want everything in one SQL Server database, use **source mode** — see `example-source`,
-which has no `orders` table because state is rebuilt from events.)
-
-Start the optional `sqlserver` compose service, create the database once, then set
-`EVENT_STORE_TYPE` and `EVENT_STORE_URL`. Omit those two variables and the example runs entirely
-on PostgreSQL exactly as above.
-
-```bash
-# 1. Start PostgreSQL + SQL Server (the sqlserver service is behind a profile)
-docker compose --profile sqlserver up -d
-
-# 2. Create the database once (the library creates tables, never databases)
-docker compose exec sqlserver /opt/mssql-tools18/bin/sqlcmd \
-  -S localhost -U sa -P 'NestMediator!2026' -C \
-  -Q "IF DB_ID('audit_example') IS NULL CREATE DATABASE audit_example;"
-
-# 3. Run with the event store pointed at SQL Server
-DATABASE_URL=postgres://postgres:postgres@localhost:5433/audit_example \
-EVENT_STORE_TYPE=sqlserver \
-EVENT_STORE_URL='Server=localhost,1433;Database=audit_example;User Id=sa;Password={NestMediator!2026};Encrypt=false;TrustServerCertificate=true' \
-npm run start:dev
-```
-
-On startup you should see `Ensuring event store schema exists (sqlserver)...`. The official SQL
-Server image is amd64 only, so on Apple Silicon it runs under emulation.
+The event-store connection can be switched to SQL Server with
+`EVENT_STORE_TYPE=sqlserver` and `EVENT_STORE_URL`; the example's business
+`orders` table remains PostgreSQL-owned.
 
 | Endpoint | Description |
 |----------|-------------|
@@ -1328,86 +1193,12 @@ DATABASE_URL=postgres://postgres:postgres@localhost:5434/source_example npm run 
 
 ---
 
-## Migrating to v1.0.0
+## Migration and release history
 
-### `AggregateRepository` — zero-boilerplate with `@ForAggregate`
-
-The `AggregateRepository` no longer requires a constructor, `aggregateType`, `createEmptyAggregate()`, or `deserializeEvent()` overrides. Use the `@ForAggregate` decorator instead.
-
-**Before:**
-
-```typescript
-@Injectable()
-export class OrderAggregateRepository
-  extends AggregateRepository<OrderAggregate, string>
-{
-  protected readonly aggregateType = 'Order';
-
-  constructor(
-    @Inject(EVENT_STORE_REPOSITORY) eventStore: IEventStoreRepository,
-    mediatorBus: MediatorBus,
-  ) {
-    super(eventStore, mediatorBus);
-  }
-
-  protected createEmptyAggregate(): OrderAggregate {
-    return new OrderAggregate();
-  }
-
-  protected deserializeEvent(eventType: string, payload: Record<string, unknown>): IEvent {
-    const types = { OrderPlacedEvent, OrderCancelledEvent };
-    const EventClass = types[eventType];
-    if (!EventClass) throw new Error(`Unknown event type: ${eventType}`);
-    return Object.assign(Object.create(EventClass.prototype), payload);
-  }
-}
-```
-
-**After:**
-
-```typescript
-@Injectable()
-@ForAggregate(OrderAggregate)
-export class OrderAggregateRepository
-  extends AggregateRepository<OrderAggregate, string> {}
-```
-
-The base class now uses property injection (`@Inject`) for `eventStore` and `eventBus`, derives `aggregateType` from the aggregate class, and uses the `@DomainEvent` registry for automatic event deserialization. All methods remain overridable for custom logic.
-
-### `compensate()` -> `applyCompensatingEvent()`
-
-The `compensate()` method on `ICriticalEventConsumer` is **deprecated**. It performed side effects directly, which were not captured in the event store and not traceable.
-
-Use `applyCompensatingEvent()` instead — it returns a compensating event that the library publishes through the full event flow (persisted, dispatched, traceable).
-
-**Before (deprecated):**
-
-```typescript
-async compensate(event: OrderPlacedEvent): Promise<void> {
-  await this.inventoryService.release(event.orderId); // Side effect, not persisted
-}
-```
-
-**After:**
-
-```typescript
-async applyCompensatingEvent(event: OrderPlacedEvent): Promise<IEvent> {
-  return new InventoryReleasedEvent(event.orderId); // Event published through full flow
-}
-
-// Dedicated consumer for the compensating event
-@EventHandler(InventoryReleasedEvent)
-export class HandleInventoryReleasedHandler implements IEventConsumer<InventoryReleasedEvent> {
-  async handle(event: InventoryReleasedEvent): Promise<void> {
-    await this.inventoryService.release(event.orderId); // Logic lives here now
-  }
-}
-```
-
-### Other Changes
-
-- **`IEventHandler` renamed to `IEventConsumer`** — `IEventHandler` is a deprecated alias
-- **MediatorBus API unchanged** — `send()`, `query()`, `publish()` work as before
+Upgrade notes for older package names and API versions live in
+[MIGRATION.md](MIGRATION.md). Version-specific behavior and compatibility notes
+live in [CHANGELOG.md](CHANGELOG.md), keeping this README focused on current
+configuration and usage.
 
 ## License
 
